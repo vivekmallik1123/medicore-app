@@ -329,18 +329,17 @@ function NewPatientModal({ onClose, onAdd }) {
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Overlay */}
+    // Outer: fixed full-screen overlay — clicking it closes the modal
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(2px)' }}
+      onMouseDown={onClose}
+    >
+      {/* Card: stopPropagation so clicks inside don't bubble to overlay */}
       <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      {/* Card */}
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full mx-4 overflow-hidden"
-        style={{ maxWidth: '600px' }}
-        onClick={(e) => e.stopPropagation()}
+        className="bg-white rounded-xl shadow-2xl w-full flex flex-col"
+        style={{ maxWidth: '600px', maxHeight: '90vh' }}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#E5E7EB]">
