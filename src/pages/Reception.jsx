@@ -355,7 +355,7 @@ function NewPatientModal({ onClose, onAdd }) {
           </button>
         </div>
 
-        <div className="px-6 pt-5 pb-6">
+        <div className="px-6 pt-5 pb-6 overflow-y-auto flex-1">
           <ProgressBar step={step} />
 
           {/* ── STEP 1: Patient Info ── */}
