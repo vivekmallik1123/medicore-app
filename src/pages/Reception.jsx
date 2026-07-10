@@ -628,6 +628,7 @@ export default function Reception() {
             <p className="text-xs text-gray-500 mt-0.5">{patients.length} patients in queue today</p>
           </div>
           <button
+            type="button"
             onClick={() => setShowModal(true)}
             className="flex items-center gap-2 bg-[#1A5276] text-white text-sm font-semibold px-4 py-2.5 rounded-lg hover:bg-[#154360] transition-colors shadow-sm flex-shrink-0"
           >
