@@ -142,14 +142,14 @@ function WeeklyChart() {
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={WEEKLY_OPD}
-            height={280}
+            height={300}
             barSize={28}
-            margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+            margin={{ top: 4, right: 4, left: -20, bottom: 16 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" vertical={false} />
             <XAxis
               dataKey="day"
-              tick={{ fontSize: 11, fill: '#6B7280' }}
+              tick={{ fontSize: 12, fill: '#6B7280' }}
               axisLine={false}
               tickLine={false}
             />
@@ -330,7 +330,7 @@ export default function Dashboard() {
       </div>
 
       {/* ROW 2 — Chart + Alerts (60/40) */}
-      <div className="grid grid-cols-5 gap-4 h-72 overflow-hidden mt-6">
+      <div className="grid grid-cols-5 gap-4 h-80 overflow-hidden mt-6">
         <div className="col-span-3 h-full">
           <WeeklyChart />
         </div>
