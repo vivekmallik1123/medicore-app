@@ -138,10 +138,11 @@ function WeeklyChart() {
         </div>
         <span className="text-xs text-gray-400">Total: {WEEKLY_OPD.reduce((s, d) => s + d.patients, 0)}</span>
       </div>
-      <div className="flex-1 px-4 py-4">
+      <div className="flex-1 px-4 py-4 overflow-hidden">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={WEEKLY_OPD}
+            height={280}
             barSize={28}
             margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
           >
@@ -329,17 +330,19 @@ export default function Dashboard() {
       </div>
 
       {/* ROW 2 — Chart + Alerts (60/40) */}
-      <div className="grid grid-cols-5 gap-4" style={{ height: '280px' }}>
-        <div className="col-span-3">
+      <div className="grid grid-cols-5 gap-4 h-72 overflow-hidden mt-6">
+        <div className="col-span-3 h-full">
           <WeeklyChart />
         </div>
-        <div className="col-span-2">
+        <div className="col-span-2 h-full">
           <AlertsCard />
         </div>
       </div>
 
       {/* ROW 3 — Department Table */}
-      <DepartmentTable />
+      <div className="mt-8">
+        <DepartmentTable />
+      </div>
     </div>
   )
 }
