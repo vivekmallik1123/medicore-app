@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   BarChart,
   Bar,
@@ -8,17 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts'
-import {
-  IndianRupee,
-  Users,
-  BedDouble,
-  UserCheck,
-  AlertTriangle,
-  AlertCircle,
-  Info,
-  CheckCircle2,
-} from 'lucide-react'
-import KPITile from '../components/KPITile.jsx'
+import { IndianRupee, Users, BedDouble, UserCheck, TriangleAlert as AlertTriangle, CircleAlert as AlertCircle, Info, CircleCheck as CheckCircle2, ChevronRight } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { KPIS, WEEKLY_OPD, ALERTS, DEPARTMENTS } from '../data/mockData.js'
 
@@ -268,65 +260,226 @@ function DepartmentTable() {
   )
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
+// ─── Urgent Action Box ────────────────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = ['Admin', 'Doctor', 'Receptionist', 'Lab', 'Pharmacy']
+
+const ROLE_FILTER = {
+  Admin:        [1, 2, 3, 4, 5],
+  Doctor:       [1, 2, 5],
+  Pharmacy:     [3],
+  Reception:    [1, 4],
+  Receptionist: [1, 4],
+  Lab:          [1, 2],
+}
+
+const URGENT_CARDS = [
+  {
+    id: 1, border: '#C0392B', badge: 'ALL STAFF', badgeBg: 'bg-red-100 text-red-700',
+    title: 'ICU Bed 1 critical', detail: 'Arjun Singh — vitals dropping', action: 'View Patient',
+  },
+  {
+    id: 2, border: '#C0392B', badge: 'LAB', badgeBg: 'bg-red-100 text-red-700',
+    title: 'Critical lab result', detail: 'CBC Vikram Desai — unacknowledged', action: 'View Result',
+  },
+  {
+    id: 3, border: '#CA6F1E', badge: 'PHARMACY', badgeBg: 'bg-orange-100 text-orange-700',
+    title: 'Stock critical', detail: 'Metformin — 1 day supply left', action: 'Order Now',
+  },
+  {
+    id: 4, border: '#CA6F1E', badge: 'RECEPTION', badgeBg: 'bg-orange-100 text-orange-700',
+    title: 'Queue alert', detail: '3 patients waiting 45+ mins', action: 'View Queue',
+  },
+  {
+    id: 5, border: '#C0392B', badge: 'DOCTOR', badgeBg: 'bg-red-100 text-red-700',
+    title: 'Unacknowledged results', detail: 'Dr. Mehta — 2 critical lab results pending', action: 'View Results',
+  },
+]
+
+function UrgentActionBox() {
+  const [role, setRole] = useState('Admin')
+  const visibleIds = ROLE_FILTER[role] || []
+  const cards = URGENT_CARDS.filter((c) => visibleIds.includes(c.id))
+
+  return (
+    <div
+      className="rounded-lg border flex-shrink-0"
+      style={{ borderColor: '#C0392B', backgroundColor: '#FEF2F2', borderRadius: '8px', padding: '16px' }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <p className="font-bold" style={{ color: '#C0392B', fontSize: '16px' }}>
+          🚨 Requires Immediate Action
+        </p>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Viewing as:</span>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            className="text-xs font-semibold border border-[#E5E7EB] rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30"
+          >
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex overflow-x-auto gap-3 pb-1">
+        {cards.map((c) => (
+          <div
+            key={c.id}
+            className="bg-white rounded-lg shadow-sm flex-shrink-0"
+            style={{
+              borderLeft: `4px solid ${c.border}`,
+              padding: '12px',
+              minWidth: '260px',
+            }}
+          >
+            <span
+              className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full ${c.badgeBg}`}
+            >
+              {c.badge}
+            </span>
+            <p className="text-sm font-bold text-gray-900 mt-2">{c.title}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
+            <button className="mt-3 text-xs font-semibold border border-[#E5E7EB] text-gray-700 px-3 py-1.5 rounded-lg hover:bg-[#F8F9FA] hover:border-[#1A5276] hover:text-[#1A5276] transition-all">
+              {c.action}
+            </button>
+          </div>
+        ))}
+        {cards.length === 0 && (
+          <p className="text-xs text-gray-400 py-4">No urgent actions for this role</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Clickable KPI Tile ────────────────────────────────────────────────────────────────
+
+function ClickableTile({ children, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className="relative bg-white rounded-lg border border-[#E5E7EB] p-5 shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 hover:scale-[1.02]"
+    >
+      {children}
+      <div className="flex items-center justify-between mt-2">
+        <p className="text-[10px] text-gray-400">Click to view details</p>
+        <ChevronRight className="w-3 h-3" style={{ color: '#9CA3AF' }} />
+      </div>
+    </div>
+  )
+}
+
+function TileInner({ title, value, subtitle, icon: Icon, iconBg, iconColor, trend }) {
+  return (
+    <div className="flex items-start justify-between">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate">{title}</p>
+        <p className="text-2xl font-bold text-gray-900 mt-1.5 leading-none">{value}</p>
+        {subtitle && <p className="text-xs text-gray-500 mt-1.5">{subtitle}</p>}
+        {trend && (
+          <div className="flex items-center gap-1 mt-2 text-xs font-medium text-green-600">
+            <span>{trend} vs yesterday</span>
+          </div>
+        )}
+      </div>
+      {Icon && (
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ml-3"
+          style={{ backgroundColor: iconBg, color: iconColor }}
+        >
+          <Icon className="w-5 h-5" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { revenue, opd, beds, staff } = KPIS
+  const navigate = useNavigate()
 
   return (
     <div className="space-y-5">
       {/* Page title */}
       <div>
         <h2 className="text-lg font-bold text-gray-900">Dashboard</h2>
-        <p className="text-xs text-gray-500 mt-0.5">Live overview of today’s hospital activity</p>
+        <p className="text-xs text-gray-500 mt-0.5">Live overview of today's hospital activity</p>
       </div>
 
-      {/* ROW 1 — KPI Tiles */}
-      <div className="grid grid-cols-4 gap-4">
-        {/* Revenue */}
-        <KPITile
-          title="Today Revenue"
-          value={formatRupees(revenue.value)}
-          trend={revenue.trend}
-          subtitle="Across all departments"
-          icon={IndianRupee}
-          color="green"
-        />
+      {/* Urgent Action Box */}
+      <UrgentActionBox />
 
-        {/* OPD */}
-        <KPITile
-          title="OPD Patients"
-          value={opd.value}
-          subtitle={`${opd.waiting} waiting \u00b7 ${opd.inConsult} in consultation`}
-          icon={Users}
-          color="blue"
-        />
+      {/* ROW 1 — 3 KPI Tiles */}
+      <div className="grid grid-cols-3 gap-4">
+        <ClickableTile onClick={() => navigate('/billing')}>
+          <TileInner
+            title="Today Revenue"
+            value={formatRupees(revenue.value)}
+            subtitle="Across all departments"
+            icon={IndianRupee}
+            iconBg="rgb(209 250 229)"
+            iconColor="#1E8449"
+            trend={revenue.trend}
+          />
+        </ClickableTile>
 
-        {/* Beds — custom tile with progress bar */}
-        <div className="bg-white rounded-lg border border-[#E5E7EB] p-5 shadow-sm hover:shadow-md transition-shadow">
+        <ClickableTile onClick={() => navigate('/reception')}>
+          <TileInner
+            title="OPD Patients"
+            value={opd.value}
+            subtitle={`${opd.waiting} waiting · ${opd.inConsult} in consultation`}
+            icon={Users}
+            iconBg="rgb(219 234 254)"
+            iconColor="#1A5276"
+          />
+        </ClickableTile>
+
+        <ClickableTile onClick={() => navigate('/ipd')}>
+          <TileInner
+            title="IPD Patients"
+            value={54}
+            subtitle="3 new today · 1 discharged"
+            icon={BedDouble}
+            iconBg="rgb(243 233 246)"
+            iconColor="#6C3483"
+          />
+        </ClickableTile>
+      </div>
+
+      {/* ROW 2 — 2 wider KPI Tiles */}
+      <div className="grid grid-cols-2 gap-4">
+        <ClickableTile onClick={() => navigate('/ipd')}>
           <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Beds Occupied</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide truncate">Beds Occupied</p>
               <p className="text-2xl font-bold text-gray-900 mt-1.5 leading-none">
                 {beds.occupied}
                 <span className="text-base font-medium text-gray-400">/{beds.total}</span>
               </p>
+              <p className="text-xs text-gray-500 mt-1.5">{beds.total - beds.occupied} beds available</p>
               <BedProgressBar occupied={beds.occupied} total={beds.total} />
             </div>
             <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ml-3 bg-orange-100 text-orange-600">
               <BedDouble className="w-5 h-5" />
             </div>
           </div>
-        </div>
+        </ClickableTile>
 
-        {/* Staff */}
-        <KPITile
-          title="Staff Present"
-          value={`${staff.present}/${staff.total}`}
-          subtitle={`${staff.onLeave} on leave today`}
-          icon={UserCheck}
-          color="green"
-        />
+        <ClickableTile onClick={() => navigate('/hr')}>
+          <TileInner
+            title="Staff Present"
+            value={`${staff.present}/${staff.total}`}
+            subtitle={`${staff.onLeave} on leave today`}
+            icon={UserCheck}
+            iconBg="rgb(209 250 229)"
+            iconColor="#1E8449"
+          />
+        </ClickableTile>
       </div>
 
       {/* ROW 2 — Chart + Alerts (60/40) */}
