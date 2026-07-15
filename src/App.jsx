@@ -11,6 +11,8 @@ import Pharmacy   from './pages/Pharmacy.jsx'
 import IPD        from './pages/IPD.jsx'
 import Billing    from './pages/Billing.jsx'
 import HR         from './pages/HR.jsx'
+import Profile    from './pages/Profile.jsx'
+import Notifications from './pages/Notifications.jsx'
 
 export default function App() {
   return (
@@ -28,6 +30,8 @@ export default function App() {
             <Route path="/ipd"       element={<IPD />}       />
             <Route path="/billing"   element={<Billing />}   />
             <Route path="/hr"        element={<HR />}        />
+            <Route path="/profile"   element={<Profile />}   />
+            <Route path="/notifications" element={<Notifications />} />
           </Routes>
         </main>
       </div>

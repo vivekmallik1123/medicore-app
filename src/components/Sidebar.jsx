@@ -8,6 +8,7 @@ import {
   BedDouble,
   Receipt,
   UserCog,
+  Bell,
   Heart,
 } from 'lucide-react'
 
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/ipd',       label: 'IPD',         icon: BedDouble       },
   { to: '/billing',   label: 'Billing',     icon: Receipt         },
   { to: '/hr',        label: 'HR',          icon: UserCog         },
+  { to: '/notifications', label: 'Notifications', icon: Bell     },
 ]
 
 export default function Sidebar() {
