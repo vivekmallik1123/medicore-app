@@ -275,6 +275,109 @@ export const STAFF = [
   { id: 6, name: 'Ananya Bose',  role: 'Staff Nurse',    department: 'Ward B',     status: 'Present', shift: 'Evening' },
 ]
 
+// ─── MEDICINES (extended) ────────────────────────────────────────────────────
+// (MEDICINES array above kept as-is; extended detail lives in MEDICINE_DETAIL)
+export const MEDICINE_DETAIL = [
+  {
+    id: 1, name: 'Paracetamol', genericName: 'Acetaminophen', dosage: '500mg',
+    category: 'Analgesic', stock: 120, unit: 'tabs', status: 'OK',
+    reorderLevel: 50, reorderQty: 200, avgDailyUsage: 5, last7Days: 35,
+    expiryDate: '2026-03-31', batchNo: 'PCM-2024-01',
+    purchasePrice: 1.5, sellingPrice: 2.5,
+    supplier: 'MedPlus Pharma', supplierContact: '9876543001', lastOrderDate: '01 Jun 2026',
+    specialInstructions: 'Store below 25°C. Keep away from moisture.',
+  },
+  {
+    id: 2, name: 'Amoxicillin', genericName: 'Amoxicillin Trihydrate', dosage: '250mg',
+    category: 'Antibiotic', stock: 45, unit: 'caps', status: 'Low',
+    reorderLevel: 100, reorderQty: 300, avgDailyUsage: 8, last7Days: 56,
+    expiryDate: '2025-08-31', batchNo: 'AMX-2024-03',
+    purchasePrice: 5.0, sellingPrice: 8.0,
+    supplier: 'Cipla Distributors', supplierContact: '9876543003', lastOrderDate: '15 May 2026',
+    specialInstructions: 'Complete the full course. Refrigerate after opening.',
+  },
+  {
+    id: 3, name: 'Omeprazole', genericName: 'Omeprazole', dosage: '20mg',
+    category: 'Antacid', stock: 200, unit: 'caps', status: 'OK',
+    reorderLevel: 80, reorderQty: 250, avgDailyUsage: 4, last7Days: 28,
+    expiryDate: '2027-01-31', batchNo: 'OMP-2025-01',
+    purchasePrice: 3.0, sellingPrice: 5.0,
+    supplier: 'Sun Pharma Distributors', supplierContact: '9876543002', lastOrderDate: '10 Apr 2026',
+    specialInstructions: 'Take 30 minutes before meals.',
+  },
+  {
+    id: 4, name: 'Metformin', genericName: 'Metformin Hydrochloride', dosage: '500mg',
+    category: 'Antidiabetic', stock: 8, unit: 'tabs', status: 'Critical',
+    reorderLevel: 50, reorderQty: 200, avgDailyUsage: 10, last7Days: 70,
+    expiryDate: '2025-06-30', batchNo: 'MET-2024-02',
+    purchasePrice: 1.8, sellingPrice: 3.0,
+    supplier: 'Mankind Pharma', supplierContact: '9876543004', lastOrderDate: '01 Mar 2026',
+    specialInstructions: 'Take with meals. Monitor blood glucose regularly.',
+  },
+  {
+    id: 5, name: 'Amlodipine', genericName: 'Amlodipine Besylate', dosage: '5mg',
+    category: 'Antihypert.', stock: 90, unit: 'tabs', status: 'OK',
+    reorderLevel: 40, reorderQty: 150, avgDailyUsage: 3, last7Days: 21,
+    expiryDate: '2026-11-30', batchNo: 'AML-2025-02',
+    purchasePrice: 4.0, sellingPrice: 6.5,
+    supplier: 'Abbott India', supplierContact: '9876543005', lastOrderDate: '20 May 2026',
+    specialInstructions: 'Take at the same time each day. Do not crush.',
+  },
+]
+
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+export const SUPPLIERS = [
+  { id: 1, name: 'MedPlus Pharma',         contact: '9876543001', city: 'Ahmedabad', speciality: 'General medicines',          lastOrderDate: '01 Jun 2026' },
+  { id: 2, name: 'Sun Pharma Distributors', contact: '9876543002', city: 'Surat',     speciality: 'Branded medicines',           lastOrderDate: '10 Apr 2026' },
+  { id: 3, name: 'Cipla Distributors',      contact: '9876543003', city: 'Ahmedabad', speciality: 'Antibiotics and cardiac',     lastOrderDate: '15 May 2026' },
+  { id: 4, name: 'Mankind Pharma',          contact: '9876543004', city: 'Vadodara',  speciality: 'OTC medicines',               lastOrderDate: '01 Mar 2026' },
+  { id: 5, name: 'Abbott India',            contact: '9876543005', city: 'Ahmedabad', speciality: 'Specialty drugs',             lastOrderDate: '20 May 2026' },
+]
+
+// ─── PURCHASE ORDERS ──────────────────────────────────────────────────────────
+export const PURCHASE_ORDERS = [
+  {
+    id: 'PO-001', supplier: 'MedPlus Pharma', supplierContact: '9876543001',
+    date: '01 Jul 2026', status: 'Received', amount: 12500,
+    items: [
+      { medicine: 'Paracetamol 500mg',  qty: 500, unit: 'tabs', rate: 1.5,  total: 750  },
+      { medicine: 'Omeprazole 20mg',    qty: 200, unit: 'caps', rate: 3.0,  total: 600  },
+      { medicine: 'Amlodipine 5mg',     qty: 150, unit: 'tabs', rate: 4.0,  total: 600  },
+      { medicine: 'Cetirizine 10mg',    qty: 300, unit: 'tabs', rate: 2.0,  total: 600  },
+      { medicine: 'Atorvastatin 10mg',  qty: 200, unit: 'tabs', rate: 8.0,  total: 1600 },
+    ],
+  },
+  {
+    id: 'PO-002', supplier: 'Sun Pharma Distributors', supplierContact: '9876543002',
+    date: '08 Jul 2026', status: 'Received', amount: 8200,
+    items: [
+      { medicine: 'Metoprolol 25mg',    qty: 200, unit: 'tabs', rate: 6.0,  total: 1200 },
+      { medicine: 'Losartan 50mg',      qty: 150, unit: 'tabs', rate: 9.0,  total: 1350 },
+      { medicine: 'Rosuvastatin 10mg',  qty: 100, unit: 'tabs', rate: 12.0, total: 1200 },
+    ],
+  },
+  {
+    id: 'PO-003', supplier: 'Cipla Distributors', supplierContact: '9876543003',
+    date: '14 Jul 2026', status: 'Pending', amount: 24300,
+    items: [
+      { medicine: 'Amoxicillin 250mg',  qty: 300, unit: 'caps', rate: 5.0,  total: 1500 },
+      { medicine: 'Azithromycin 500mg', qty: 100, unit: 'tabs', rate: 18.0, total: 1800 },
+      { medicine: 'Metformin 500mg',    qty: 200, unit: 'tabs', rate: 1.8,  total: 360  },
+      { medicine: 'Glimepiride 2mg',    qty: 150, unit: 'tabs', rate: 7.0,  total: 1050 },
+    ],
+  },
+]
+
+// ─── BILLING STATUS TAGS ──────────────────────────────────────────────────────
+// Visual mock: tracks pharmacy dispense state per invoice
+export const BILLING_STATUS = {
+  'INV-2025-001': 'READY_TO_COLLECT',      // already dispensed
+  'INV-2025-002': 'READY_TO_COLLECT',
+  'INV-2025-003': 'PRESCRIPTION_PENDING',  // Anjali — pharmacy not yet dispensed
+  'INV-2025-004': 'PRESCRIPTION_PENDING',  // Vikram
+  'INV-2025-005': 'PRESCRIPTION_PENDING',  // Sunita
+}
+
 // ─── BILLS ────────────────────────────────────────────────────────────────────
 export const BILLS = [
   {

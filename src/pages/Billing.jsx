@@ -10,7 +10,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
-import { BILLS } from '../data/mockData.js'
+import { BILLS, BILLING_STATUS } from '../data/mockData.js'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -83,8 +83,9 @@ function InvoiceList({ bills, selected, onSelect }) {
           </div>
         )}
         {bills.map((bill) => {
-          const isSelected = selected?.id === bill.id
-          const { total } = calcTotals(bill.items)
+          const isSelected  = selected?.id === bill.id
+          const { total }   = calcTotals(bill.items)
+          const rxTag       = BILLING_STATUS[bill.id]
           return (
             <button
               key={bill.id}
@@ -97,16 +98,21 @@ function InvoiceList({ bills, selected, onSelect }) {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{bill.patient}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{bill.patient}</p>
+                    {rxTag === 'PRESCRIPTION_PENDING' && (
+                      <span className="text-[9px] font-bold bg-yellow-100 text-yellow-700 border border-yellow-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">Rx Pending</span>
+                    )}
+                    {rxTag === 'READY_TO_COLLECT' && (
+                      <span className="text-[9px] font-bold bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">Ready</span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-gray-400 mt-0.5 font-mono">
                     {bill.id} · {bill.token}
                   </p>
                   <p className="text-xs font-semibold text-gray-700 mt-1">{fmt(total)}</p>
                 </div>
-                <StatusBadge
-                  status={bill.status}
-                  size="sm"
-                />
+                <StatusBadge status={bill.status} size="sm" />
               </div>
             </button>
           )
