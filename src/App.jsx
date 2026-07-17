@@ -6,8 +6,9 @@ import Header from './components/Header.jsx'
 import Dashboard  from './pages/Dashboard.jsx'
 import Reception  from './pages/Reception.jsx'
 import OPDDoctor  from './pages/OPDDoctor.jsx'
-import Lab        from './pages/Lab.jsx'
-import LabSettings from './pages/LabSettings.jsx'
+import Lab          from './pages/Lab.jsx'
+import LabSettings  from './pages/LabSettings.jsx'
+import IPDAdmission from './pages/IPDAdmission.jsx'
 import Pharmacy   from './pages/Pharmacy.jsx'
 import IPD        from './pages/IPD.jsx'
 import Billing    from './pages/Billing.jsx'
@@ -26,8 +27,9 @@ export default function App() {
             <Route path="/"          element={<Dashboard />} />
             <Route path="/reception" element={<Reception />} />
             <Route path="/opd"       element={<OPDDoctor />} />
-            <Route path="/lab"       element={<Lab />}       />
-            <Route path="/lab-settings" element={<LabSettings />} />
+            <Route path="/lab"           element={<Lab />}          />
+            <Route path="/lab-settings"   element={<LabSettings />}  />
+            <Route path="/ipd-admission"  element={<IPDAdmission />} />
             <Route path="/pharmacy"  element={<Pharmacy />}  />
             <Route path="/ipd"       element={<IPD />}       />
             <Route path="/billing"   element={<Billing />}   />

@@ -276,23 +276,27 @@ const ROLE_FILTER = {
 const URGENT_CARDS = [
   {
     id: 1, border: '#C0392B', badge: 'ALL STAFF', badgeBg: 'bg-red-100 text-red-700',
-    title: 'ICU Bed 1 critical', detail: 'Arjun Singh — vitals dropping', action: 'View Patient',
+    title: 'ICU Bed 1 critical', detail: 'Arjun Singh — vitals dropping', action: 'View Patient', link: null,
   },
   {
     id: 2, border: '#C0392B', badge: 'LAB', badgeBg: 'bg-red-100 text-red-700',
-    title: 'Critical lab result', detail: 'CBC Vikram Desai — unacknowledged', action: 'View Result',
+    title: 'Critical lab result', detail: 'CBC Vikram Desai — unacknowledged', action: 'View Result', link: null,
   },
   {
     id: 3, border: '#CA6F1E', badge: 'PHARMACY', badgeBg: 'bg-orange-100 text-orange-700',
-    title: 'Stock critical', detail: 'Metformin — 1 day supply left', action: 'Order Now',
+    title: 'Stock critical', detail: 'Metformin — 1 day supply left', action: 'Order Now', link: null,
   },
   {
     id: 4, border: '#CA6F1E', badge: 'RECEPTION', badgeBg: 'bg-orange-100 text-orange-700',
-    title: 'Queue alert', detail: '3 patients waiting 45+ mins', action: 'View Queue',
+    title: 'Queue alert', detail: '3 patients waiting 45+ mins', action: 'View Queue', link: null,
   },
   {
     id: 5, border: '#C0392B', badge: 'DOCTOR', badgeBg: 'bg-red-100 text-red-700',
-    title: 'Unacknowledged results', detail: 'Dr. Mehta — 2 critical lab results pending', action: 'View Results',
+    title: 'Unacknowledged results', detail: 'Dr. Mehta — 2 critical lab results pending', action: 'View Results', link: null,
+  },
+  {
+    id: 6, border: '#1A5276', badge: 'RECEPTION', badgeBg: 'bg-blue-100 text-blue-700',
+    title: 'IPD ADMISSION', detail: 'Dr. Kumar recommends IPD admission for Anjali Mehta (T003)', action: 'Proceed', link: '/ipd-admission',
   },
 ]
 
@@ -342,9 +346,17 @@ function UrgentActionBox() {
             </span>
             <p className="text-sm font-bold text-gray-900 mt-2">{c.title}</p>
             <p className="text-xs text-gray-500 mt-0.5">{c.detail}</p>
-            <button className="mt-3 text-xs font-semibold border border-[#E5E7EB] text-gray-700 px-3 py-1.5 rounded-lg hover:bg-[#F8F9FA] hover:border-[#1A5276] hover:text-[#1A5276] transition-all">
-              {c.action}
-            </button>
+            {c.link ? (
+              <button
+                onClick={() => navigate(c.link)}
+                className="mt-3 text-xs font-semibold bg-[#1A5276] text-white px-3 py-1.5 rounded-lg hover:bg-[#154360] transition-all">
+                {c.action}
+              </button>
+            ) : (
+              <button className="mt-3 text-xs font-semibold border border-[#E5E7EB] text-gray-700 px-3 py-1.5 rounded-lg hover:bg-[#F8F9FA] hover:border-[#1A5276] hover:text-[#1A5276] transition-all">
+                {c.action}
+              </button>
+            )}
           </div>
         ))}
         {cards.length === 0 && (

@@ -248,21 +248,28 @@ export const MEDICINES = [
   { id: 5, name: 'Amlodipine',   dosage: '5mg',   stock: 90,  unit: 'tabs', status: 'OK',       category: 'Antihypert.',  price: 6.5  },
 ]
 
+// ─── WARDS ─────────────────────────────────────────────────────────────────────
+export const WARDS = [
+  { id: 1, name: 'Ward A', type: 'General',        beds: 5, active: true, notes: 'General male/female ward' },
+  { id: 2, name: 'Ward B', type: 'General',        beds: 5, active: true, notes: 'General male/female ward' },
+  { id: 3, name: 'ICU',    type: 'ICU',            beds: 3, active: true, notes: 'Intensive Care Unit'      },
+]
+
 // ─── BEDS ─────────────────────────────────────────────────────────────────────
 export const BEDS = [
-  { id: 'Bed1',  ward: 'Ward A', status: 'Occupied',    patient: 'Ramesh Patel',  days: 3 },
-  { id: 'Bed2',  ward: 'Ward A', status: 'Occupied',    patient: 'Sunita Joshi',  days: 1 },
-  { id: 'Bed3',  ward: 'Ward A', status: 'Empty',       patient: null,            days: 0 },
-  { id: 'Bed4',  ward: 'Ward A', status: 'Cleaning',    patient: null,            days: 0 },
-  { id: 'Bed5',  ward: 'Ward A', status: 'Empty',       patient: null,            days: 0 },
-  { id: 'Bed6',  ward: 'Ward B', status: 'Occupied',    patient: 'Vikram Desai',  days: 5 },
-  { id: 'Bed7',  ward: 'Ward B', status: 'Empty',       patient: null,            days: 0 },
-  { id: 'Bed8',  ward: 'Ward B', status: 'Maintenance', patient: null,            days: 0 },
-  { id: 'Bed9',  ward: 'Ward B', status: 'Empty',       patient: null,            days: 0 },
-  { id: 'Bed10', ward: 'Ward B', status: 'Occupied',    patient: 'Kiran Rao',     days: 2 },
-  { id: 'ICU1',  ward: 'ICU',    status: 'Critical',    patient: 'Arjun Singh',   days: 1 },
-  { id: 'ICU2',  ward: 'ICU',    status: 'Empty',       patient: null,            days: 0 },
-  { id: 'ICU3',  ward: 'ICU',    status: 'Empty',       patient: null,            days: 0 },
+  { id: 'A1', ward: 'Ward A', status: 'Occupied',    patient: 'Ramesh Patel',  days: 3, uhid: 'PT-000001', admitDate: '06 Jul 2026', diagnosis: 'Acute Chest Pain',       doctor: 'Dr. Suresh Mehta',  discharge: '12 Jul 2026' },
+  { id: 'A2', ward: 'Ward A', status: 'Occupied',    patient: 'Sunita Joshi',  days: 1, uhid: 'PT-000005', admitDate: '08 Jul 2026', diagnosis: 'Migraine — Observation', doctor: 'Dr. Priya Nair',    discharge: '10 Jul 2026' },
+  { id: 'A3', ward: 'Ward A', status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'A4', ward: 'Ward A', status: 'Cleaning',    patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'A5', ward: 'Ward A', status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'B1', ward: 'Ward B', status: 'Occupied',    patient: 'Vikram Desai',  days: 5, uhid: 'PT-000004', admitDate: '04 Jul 2026', diagnosis: 'Diabetes Management',    doctor: 'Dr. Anita Patel',   discharge: '14 Jul 2026' },
+  { id: 'B2', ward: 'Ward B', status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'B3', ward: 'Ward B', status: 'Maintenance', patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'B4', ward: 'Ward B', status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'B5', ward: 'Ward B', status: 'Occupied',    patient: 'Kiran Rao',     days: 2, uhid: 'PT-000006', admitDate: '07 Jul 2026', diagnosis: 'Lumbar Disc Herniation', doctor: 'Dr. Rajesh Kumar',  discharge: '15 Jul 2026' },
+  { id: 'I1', ward: 'ICU',    status: 'Critical',    patient: 'Arjun Singh',   days: 1, uhid: 'PT-000009', admitDate: '08 Jul 2026', diagnosis: 'Post-op Monitoring',     doctor: 'Dr. Vikash Shah',   discharge: 'TBD' },
+  { id: 'I2', ward: 'ICU',    status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
+  { id: 'I3', ward: 'ICU',    status: 'Empty',       patient: null,            days: 0, uhid: null, admitDate: null, diagnosis: null, doctor: null, discharge: null },
 ]
 
 // ─── STAFF ────────────────────────────────────────────────────────────────────

@@ -2,9 +2,68 @@ import { useState, useRef } from 'react'
 import {
   ChevronDown, ChevronUp, Plus, Trash2, FlaskConical,
   CheckCircle2, MessageCircle, Save, X, Printer,
-  Coffee, Play, ArrowRight, Bell,
+  Coffee, Play, ArrowRight, Bell, BedDouble,
 } from 'lucide-react'
 import { PATIENTS, DOCTORS } from '../data/mockData.js'
+
+// ─── Part 3: IPD Recommendation Button ───────────────────────────────────────────────────────────────
+
+function IPDRecommendButton({ patient }) {
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [sent,        setSent]        = useState(false)
+  const [toast,       setToast]       = useState(false)
+
+  const handleConfirm = () => {
+    setSent(true)
+    setShowConfirm(false)
+    setToast(true)
+    setTimeout(() => setToast(false), 3500)
+  }
+
+  if (sent) {
+    return (
+      <div className="mx-5 mb-3">
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
+          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-xs font-semibold text-green-800">IPD admission request sent to reception</p>
+        </div>
+        {toast && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#1A5276] text-white text-sm font-semibold px-5 py-3.5 rounded-xl shadow-2xl">
+            <BedDouble className="w-4 h-4" />
+            IPD admission request sent to reception
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-5 mb-3">
+      {!showConfirm ? (
+        <button
+          onClick={() => setShowConfirm(true)}
+          className="w-full flex items-center justify-center gap-2 border-2 border-[#1A5276] text-[#1A5276] text-sm font-semibold py-2.5 rounded-lg hover:bg-[#EBF5FB] transition-colors"
+        >
+          <BedDouble className="w-4 h-4" /> 🏥 Recommend IPD Admission
+        </button>
+      ) : (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-4 space-y-3">
+          <p className="text-xs font-semibold text-blue-800">
+            Send IPD admission recommendation for <span className="font-bold">{patient.name}</span> to reception staff?
+          </p>
+          <div className="flex gap-2">
+            <button onClick={() => setShowConfirm(false)}
+              className="flex-1 border border-gray-300 text-gray-600 text-xs font-semibold py-2 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={handleConfirm}
+              className="flex-1 bg-[#1A5276] text-white text-xs font-semibold py-2 rounded-lg hover:bg-[#154360]">
+              Yes, Send Notification
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -907,6 +966,11 @@ export default function OPDDoctor() {
                 onCallNext={handleCallNext}
                 onBreak={handleBreak}
               />
+            )}
+
+            {/* Part 3: Recommend IPD Admission */}
+            {saved && selectedPatient && (
+              <IPDRecommendButton patient={selectedPatient} />
             )}
 
             {/* Action buttons */}
