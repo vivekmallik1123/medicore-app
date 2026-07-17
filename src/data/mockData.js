@@ -216,13 +216,27 @@ export const ALERTS = [
   { id: 5, type: 'success', message: 'Lab report ready — Anjali Mehta (X-Ray Knee)',   timeAgo: '42 mins ago' },
 ]
 
-// ─── LAB TESTS ────────────────────────────────────────────────────────────────
+// ─── LAB TESTS (active queue) ────────────────────────────────────────────────
 export const LAB_TESTS = [
-  { id: 1, patient: 'Ramesh Patel',  token: 'T001', test: 'CBC (Complete Blood Count)', priority: 'Urgent',   status: 'SampleCollected', orderedBy: 'Dr. Suresh Mehta',  orderedAt: '09:15 AM' },
-  { id: 2, patient: 'Priya Shah',    token: 'T002', test: 'Lipid Profile',               priority: 'Normal',   status: 'Processing',      orderedBy: 'Dr. Anita Patel',   orderedAt: '09:30 AM' },
-  { id: 3, patient: 'Anjali Mehta',  token: 'T003', test: 'X-Ray (Knee)',                priority: 'Normal',   status: 'ReportReady',     orderedBy: 'Dr. Rajesh Kumar',  orderedAt: '09:45 AM' },
-  { id: 4, patient: 'Vikram Desai',  token: 'T004', test: 'ECG',                         priority: 'Critical', status: 'Ordered',         orderedBy: 'Dr. Suresh Mehta',  orderedAt: '10:00 AM' },
-  { id: 5, patient: 'Sunita Joshi',  token: 'T005', test: 'Urine Routine',               priority: 'Normal',   status: 'Processing',      orderedBy: 'Dr. Priya Nair',    orderedAt: '10:15 AM' },
+  { id: 1, patient: 'Ramesh Patel',  token: 'T001', test: 'CBC (Complete Blood Count)', priority: 'Urgent',   status: 'SampleCollected', orderedBy: 'Dr. Suresh Mehta',  orderedAt: '09:15 AM', tatMinutes: 240, elapsedMinutes: 45  },
+  { id: 2, patient: 'Priya Shah',    token: 'T002', test: 'Lipid Profile',               priority: 'Normal',   status: 'Processing',      orderedBy: 'Dr. Anita Patel',   orderedAt: '09:30 AM', tatMinutes: 360, elapsedMinutes: 190 },
+  { id: 3, patient: 'Anjali Mehta',  token: 'T003', test: 'X-Ray (Knee)',                priority: 'Normal',   status: 'ReportReady',     orderedBy: 'Dr. Rajesh Kumar',  orderedAt: '09:45 AM', tatMinutes: 60,  elapsedMinutes: 55  },
+  { id: 4, patient: 'Vikram Desai',  token: 'T004', test: 'ECG',                         priority: 'Critical', status: 'Ordered',         orderedBy: 'Dr. Suresh Mehta',  orderedAt: '10:00 AM', tatMinutes: 30,  elapsedMinutes: 10  },
+  { id: 5, patient: 'Sunita Joshi',  token: 'T005', test: 'Urine Routine',               priority: 'Normal',   status: 'Processing',      orderedBy: 'Dr. Priya Nair',    orderedAt: '10:15 AM', tatMinutes: 180, elapsedMinutes: 100 },
+]
+
+// ─── LAB TEST MASTER (settings / catalog) ─────────────────────────────────────
+export const LAB_TEST_MASTER = [
+  { id: 1,  name: 'Complete Blood Count (CBC)',   category: 'Hematology',   price: 250, tat: '4 hrs',   tatValue: 4,  tatUnit: 'hours',   referenceRange: 'RBC: 4.5–5.5 M/µL, WBC: 4000–11000 /µL, Platelets: 150000–400000 /µL', specialInstructions: 'Fasting not required',          status: 'Active' },
+  { id: 2,  name: 'Lipid Profile',                category: 'Biochemistry', price: 450, tat: '6 hrs',   tatValue: 6,  tatUnit: 'hours',   referenceRange: 'Total Cholesterol: <200 mg/dL, LDL: <100 mg/dL, HDL: >40 mg/dL',          specialInstructions: '12-hour fasting required',      status: 'Active' },
+  { id: 3,  name: 'Blood Glucose Fasting',        category: 'Biochemistry', price: 150, tat: '2 hrs',   tatValue: 2,  tatUnit: 'hours',   referenceRange: '70–100 mg/dL',                                                            specialInstructions: '8-hour fasting required',       status: 'Active' },
+  { id: 4,  name: 'Urine Routine',                category: 'Microbiology', price: 100, tat: '3 hrs',   tatValue: 3,  tatUnit: 'hours',   referenceRange: 'pH: 4.5–8.0, Protein: Negative, Glucose: Negative',                      specialInstructions: 'Mid-stream sample preferred',   status: 'Active' },
+  { id: 5,  name: 'X-Ray Chest',                  category: 'Radiology',    price: 400, tat: '1 hr',    tatValue: 60, tatUnit: 'minutes', referenceRange: 'Report by Radiologist',                                                   specialInstructions: 'Remove metallic objects',       status: 'Active' },
+  { id: 6,  name: 'ECG',                          category: 'Cardiology',   price: 200, tat: '30 mins', tatValue: 30, tatUnit: 'minutes', referenceRange: 'Normal Sinus Rhythm, HR: 60–100 bpm',                                     specialInstructions: 'Rest for 5 min before test',   status: 'Active' },
+  { id: 7,  name: 'Thyroid Profile (T3 T4 TSH)',  category: 'Biochemistry', price: 600, tat: '8 hrs',   tatValue: 8,  tatUnit: 'hours',   referenceRange: 'TSH: 0.4–4.0 mIU/L, T3: 80–200 ng/dL, T4: 5.0–12.0 µg/dL',            specialInstructions: 'Morning sample preferred',     status: 'Active' },
+  { id: 8,  name: 'Liver Function Test',          category: 'Biochemistry', price: 500, tat: '6 hrs',   tatValue: 6,  tatUnit: 'hours',   referenceRange: 'ALT: 7–56 U/L, AST: 10–40 U/L, Bilirubin Total: 0.2–1.2 mg/dL',        specialInstructions: 'Fasting preferred',             status: 'Active' },
+  { id: 9,  name: 'Dengue NS1 Antigen',           category: 'Microbiology', price: 800, tat: '4 hrs',   tatValue: 4,  tatUnit: 'hours',   referenceRange: 'Negative',                                                                specialInstructions: 'Test within 5 days of fever onset', status: 'Active' },
+  { id: 10, name: 'COVID RT-PCR',                 category: 'Microbiology', price: 500, tat: '6 hrs',   tatValue: 6,  tatUnit: 'hours',   referenceRange: 'Negative (Not Detected)',                                                  specialInstructions: 'Nasopharyngeal swab required', status: 'Active' },
 ]
 
 // ─── MEDICINES ────────────────────────────────────────────────────────────────
