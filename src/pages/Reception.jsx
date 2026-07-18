@@ -1,14 +1,31 @@
-import { useState, useRef, useEffect } from 'react'
+/**
+ * Reception.jsx
+ * -------------
+ * Reception module — now connected to Supabase.
+ *
+ * Supabase interactions in this file:
+ * 1. On mount: SELECT patients from Supabase (RLS auto-filters to this hospital)
+ * 2. New patient form submit: INSERT into patients table
+ * 3. Edit patient: UPDATE patients row
+ * 4. Duplicate mobile check: SELECT count before INSERT for new patients
+ * 5. Every patient creation: INSERT into audit_logs
+ *
+ * All other modules (OPD, Lab, Pharmacy, IPD, Billing) still use mock data.
+ */
+
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Plus, X, ChevronRight, Send, Pencil, CheckCircle2, MessageCircle,
   User, Phone, Droplets, Stethoscope, Calendar, Clock, Lock,
-  AlertTriangle, Search, ChevronDown, ChevronUp,
+  AlertTriangle, Search, ChevronDown, ChevronUp, AlertCircle,
 } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge.jsx'
 import {
-  PATIENTS, DOCTORS, BLOOD_GROUPS, CHRONIC_CONDITIONS,
+  DOCTORS, BLOOD_GROUPS, CHRONIC_CONDITIONS,
   SYMPTOM_TAGS, REFERRAL_SOURCES, DEPARTMENTS,
 } from '../data/mockData.js'
+import { supabase } from '../lib/supabaseClient.js'
+import { useAuth } from '../context/AuthContext.jsx'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,8 +57,6 @@ const PAST_VISITS = [
   { date: '18 Sep 2024', doctor: 'Dr. Anita Patel',  diagnosis: 'Routine checkup',  rx: 'Multivitamins' },
 ]
 
-// ─── Status badge config ──────────────────────────────────────────────────────
-
 const STATUS_CONFIG = {
   Waiting:         { label: 'Waiting',         cls: 'bg-orange-100 text-orange-700 border border-orange-200' },
   SentToOPD:       { label: 'Sent to OPD',     cls: 'bg-blue-100 text-blue-700 border border-blue-200' },
@@ -65,14 +80,13 @@ function QueueBadge({ status }) {
   )
 }
 
-// ─── Part 1: Doctor Availability Strip ───────────────────────────────────────
+// ─── Doctor Availability Strip ────────────────────────────────────────────────
 
 function DoctorStrip() {
   const [expanded, setExpanded] = useState(false)
   const count = DOCTORS.length
   const isCompact = count > 10
   const showTwo   = count >= 6 && count <= 10
-
   const visibleDocs = isCompact && !expanded ? DOCTORS.slice(0, 5) : DOCTORS
 
   const DoctorCard = ({ doc }) => (
@@ -136,6 +150,9 @@ function QueueList({ patients, selected, onSelect }) {
         </span>
       </div>
       <div className="overflow-y-auto flex-1">
+        {patients.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-8">No patients in queue today</p>
+        )}
         {patients.map((p, i) => {
           const isSelected = selected?.id === p.id
           return (
@@ -155,17 +172,17 @@ function QueueList({ patients, selected, onSelect }) {
                       ? 'bg-red-100 text-red-700'
                       : TOKEN_COLORS[i % TOKEN_COLORS.length]
                   }`}>
-                    {p.token}
+                    {p.token || `T-${String(i + 1).padStart(3, '0')}`}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{p.name}</p>
+                    <p className="text-sm font-semibold text-gray-900 truncate">{p.full_name}</p>
                     <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {QUEUE_TIMES[i] || '—'}
                     </p>
                   </div>
                 </div>
-                <QueueBadge status={p.status} />
+                <QueueBadge status={p.status || 'Waiting'} />
               </div>
             </button>
           )
@@ -198,11 +215,31 @@ function PatientDetail({ patient, onEdit, onSendToOPD }) {
     )
   }
 
-  const initials  = patient.name.split(' ').map((n) => n[0]).join('').slice(0, 2)
-  const deptMeta  = DEPT_META[patient.department] || { color: 'bg-gray-100 text-gray-700', icon: '🏥' }
-  const doctor    = DOCTORS.find((d) => d.specialty === patient.department)
-  const canSend   = patient.status === 'Waiting'
-  const sentAlready = patient.status === 'SentToOPD'
+  // Support both Supabase column names and legacy mock field names
+  const name       = patient.full_name || patient.name || ''
+  const mobile     = patient.mobile_number || patient.contact || ''
+  const dob        = patient.date_of_birth || patient.dob || ''
+  const gender     = patient.gender || ''
+  const symptoms   = patient.symptom_tags || []
+  const referral   = patient.referral_source || patient.referralSource || ''
+  const isEmerg    = patient.is_emergency || patient.status === 'Emergency'
+  const status     = patient.status || 'Waiting'
+
+  const initials   = name.split(' ').map((n) => n[0]).join('').slice(0, 2)
+  const deptMeta   = DEPT_META[patient.department] || { color: 'bg-gray-100 text-gray-700', icon: '🏥' }
+  const doctor     = DOCTORS.find((d) => d.specialty === patient.department)
+  const canSend    = status === 'Waiting'
+  const sentAlready = status === 'SentToOPD'
+
+  // Calculate age from date_of_birth
+  const age = dob ? (() => {
+    const today = new Date()
+    const birth = new Date(dob)
+    let a = today.getFullYear() - birth.getFullYear()
+    const m = today.getMonth() - birth.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) a--
+    return a
+  })() : (patient.age || '—')
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm flex flex-col h-full overflow-hidden">
@@ -214,23 +251,30 @@ function PatientDetail({ patient, onEdit, onSendToOPD }) {
               {initials}
             </div>
             <div>
-              <h3 className="text-lg font-bold text-gray-900">{patient.name}</h3>
+              <h3 className="text-lg font-bold text-gray-900">{name}</h3>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className="text-xs font-mono font-bold text-[#1A5276] bg-blue-50 px-2 py-0.5 rounded">
-                  {patient.token}
-                </span>
+                {patient.token && (
+                  <span className="text-xs font-mono font-bold text-[#1A5276] bg-blue-50 px-2 py-0.5 rounded">
+                    {patient.token}
+                  </span>
+                )}
                 {patient.uhid && (
                   <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
                     {patient.uhid}
                   </span>
                 )}
-                <QueueBadge status={patient.status} />
+                <QueueBadge status={status} />
+                {isEmerg && (
+                  <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full animate-pulse">EMERGENCY</span>
+                )}
               </div>
             </div>
           </div>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${deptMeta.color}`}>
-            {deptMeta.icon} {patient.department}
-          </span>
+          {patient.department && (
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${deptMeta.color}`}>
+              {deptMeta.icon} {patient.department}
+            </span>
+          )}
         </div>
       </div>
 
@@ -239,40 +283,24 @@ function PatientDetail({ patient, onEdit, onSendToOPD }) {
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Patient Information</p>
           <div className="grid grid-cols-2 gap-2">
-            <InfoRow icon={User}        label="Age"         value={`${patient.age} years`} />
-            <InfoRow icon={User}        label="Gender"      value={patient.gender} />
-            <InfoRow icon={Phone}       label="Contact"     value={patient.contact} />
-            <InfoRow icon={Droplets}    label="Blood Group" value={patient.bloodGroup || '—'} />
-            <InfoRow icon={Stethoscope} label="Department"  value={patient.department} />
-            <InfoRow icon={User}        label="Doctor"      value={doctor?.name || '—'} />
+            <InfoRow icon={User}        label="Age"     value={`${age} years`} />
+            <InfoRow icon={User}        label="Gender"  value={gender || '—'} />
+            <InfoRow icon={Phone}       label="Contact" value={mobile || '—'} />
+            <InfoRow icon={Stethoscope} label="Department" value={patient.department || '—'} />
           </div>
-          {patient.allergies && patient.allergies !== 'None' && (
-            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
-              <p className="text-[10px] font-semibold text-yellow-700 uppercase tracking-wide">⚠ Allergies</p>
-              <p className="text-xs text-yellow-800 mt-0.5">{patient.allergies}</p>
-            </div>
-          )}
-          {patient.chronicConditions?.length > 0 && (
+          {symptoms.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
-              {patient.chronicConditions.map((c) => (
-                <span key={c} className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full font-medium">{c}</span>
+              {symptoms.map((s) => (
+                <span key={s} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-medium">{s}</span>
               ))}
             </div>
           )}
         </div>
 
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Reason for Visit</p>
+        {referral && (
           <div className="bg-[#F8F9FA] border border-[#E5E7EB] rounded-lg px-4 py-3">
-            <p className="text-sm text-gray-700 leading-relaxed">{patient.reason}</p>
-          </div>
-        </div>
-
-        {patient.lastVisit && (
-          <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
-            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1">Last Visit</p>
-            <p className="text-xs text-blue-800 font-medium">{patient.lastVisit.date}</p>
-            <p className="text-[10px] text-blue-600 mt-0.5">{patient.lastVisit.doctor}</p>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Referral Source</p>
+            <p className="text-sm text-gray-700">{referral}</p>
           </div>
         )}
 
@@ -308,17 +336,12 @@ function PatientDetail({ patient, onEdit, onSendToOPD }) {
           </button>
         )}
         {sentAlready && (
-          <button
-            disabled
-            className="flex-1 flex items-center justify-center gap-2 bg-green-100 text-green-700 text-sm font-semibold py-2.5 rounded-lg cursor-not-allowed"
-          >
+          <button disabled className="flex-1 flex items-center justify-center gap-2 bg-green-100 text-green-700 text-sm font-semibold py-2.5 rounded-lg cursor-not-allowed">
             <CheckCircle2 className="w-4 h-4" />
             Sent ✓
           </button>
         )}
-        {!canSend && !sentAlready && (
-          <div className="flex-1" />
-        )}
+        {!canSend && !sentAlready && <div className="flex-1" />}
         <button
           onClick={() => onEdit(patient)}
           className="flex items-center justify-center gap-2 border border-[#E5E7EB] text-gray-600 text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-[#F8F9FA] transition-colors"
@@ -360,8 +383,10 @@ function validateDob(dob) {
   return null
 }
 
-function generateUHID(existingCount) {
-  return `PT-${String(existingCount + 1).padStart(6, '0')}`
+// Sanitize a text string: trim whitespace, collapse internal spaces
+function sanitizeText(str) {
+  if (!str) return ''
+  return str.trim().replace(/\s+/g, ' ')
 }
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
@@ -414,38 +439,18 @@ function EmergencyForm({ onRegister, onCancel }) {
         <AlertTriangle className="w-4 h-4 text-red-600" />
         <p className="text-sm font-bold text-red-700">Emergency Registration</p>
       </div>
-      <input
-        type="text" placeholder="Patient Name *"
-        value={f.name} onChange={(e) => set('name', e.target.value)}
-        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white"
-      />
-      <input
-        type="tel" placeholder="Mobile Number *"
-        value={f.mobile} onChange={(e) => set('mobile', e.target.value)}
-        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white"
-      />
-      <input
-        type="number" placeholder="Age *" min="0" max="120"
-        value={f.age} onChange={(e) => set('age', e.target.value)}
-        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white"
-      />
-      <textarea
-        rows={2} placeholder="Emergency Reason *"
-        value={f.reason} onChange={(e) => set('reason', e.target.value)}
-        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white resize-none"
-      />
+      <input type="text" placeholder="Patient Name *" value={f.name} onChange={(e) => set('name', e.target.value)}
+        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white" />
+      <input type="tel" placeholder="Mobile Number *" value={f.mobile} onChange={(e) => set('mobile', e.target.value)}
+        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white" />
+      <input type="number" placeholder="Age *" min="0" max="120" value={f.age} onChange={(e) => set('age', e.target.value)}
+        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white" />
+      <textarea rows={2} placeholder="Emergency Reason *" value={f.reason} onChange={(e) => set('reason', e.target.value)}
+        className="w-full border border-red-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 bg-white resize-none" />
       <div className="flex gap-2">
-        <button
-          onClick={onCancel}
-          className="flex-1 border border-gray-300 text-gray-600 text-sm font-medium py-2 rounded-lg hover:bg-gray-50"
-        >
-          Cancel
-        </button>
-        <button
-          disabled={!valid}
-          onClick={() => onRegister(f)}
-          className="flex-1 bg-red-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
+        <button onClick={onCancel} className="flex-1 border border-gray-300 text-gray-600 text-sm font-medium py-2 rounded-lg hover:bg-gray-50">Cancel</button>
+        <button disabled={!valid} onClick={() => onRegister(f)}
+          className="flex-1 bg-red-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">
           Register Emergency Patient
         </button>
       </div>
@@ -465,9 +470,8 @@ function ReturningSearch({ allPatients, onSelect }) {
     setResults(
       allPatients.filter(
         (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.contact.replace(/\s/g, '').includes(q.replace(/\s/g, '')) ||
-          (p.uhid && p.uhid.toLowerCase().includes(q))
+          (p.full_name || '').toLowerCase().includes(q) ||
+          (p.mobile_number || '').replace(/\s/g, '').includes(q.replace(/\s/g, ''))
       ).slice(0, 6)
     )
   }, [query, allPatients])
@@ -478,7 +482,7 @@ function ReturningSearch({ allPatients, onSelect }) {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         <input
           type="text"
-          placeholder="Search by name, mobile number, or Patient ID..."
+          placeholder="Search by name or mobile number..."
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="w-full border border-[#E5E7EB] rounded-lg pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]"
@@ -490,20 +494,15 @@ function ReturningSearch({ allPatients, onSelect }) {
       {results.length > 0 && (
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {results.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onSelect(p)}
-              className="w-full text-left bg-[#F8F9FA] hover:bg-[#EBF5FB] border border-[#E5E7EB] hover:border-[#1A5276]/30 rounded-lg px-4 py-3 transition-all"
-            >
+            <button key={p.id} onClick={() => onSelect(p)}
+              className="w-full text-left bg-[#F8F9FA] hover:bg-[#EBF5FB] border border-[#E5E7EB] hover:border-[#1A5276]/30 rounded-lg px-4 py-3 transition-all">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-900">{p.name}</p>
-                <span className="text-[10px] font-mono text-[#1A5276] bg-blue-50 px-2 py-0.5 rounded">{p.uhid}</span>
+                <p className="text-sm font-semibold text-gray-900">{p.full_name}</p>
               </div>
               <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
-                <span>{p.age} yrs · {p.gender}</span>
+                <span>{p.gender}</span>
                 <span>·</span>
-                <span>{p.contact}</span>
-                {p.lastVisit && <><span>·</span><span>Last: {p.lastVisit.date}</span></>}
+                <span>{p.mobile_number}</span>
               </div>
             </button>
           ))}
@@ -523,19 +522,13 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
   const dobError     = form.dob ? validateDob(form.dob) : null
   const age          = form.dob && !dobError ? calcAge(form.dob) : null
 
-  const toggleCondition = (c) => {
-    const curr = form.chronicConditions || []
-    if (c === 'None of the above') {
-      set('chronicConditions', curr.includes(c) ? [] : ['None of the above'])
-      return
-    }
-    const without = curr.filter((x) => x !== 'None of the above')
-    set('chronicConditions', without.includes(c) ? without.filter((x) => x !== c) : [...without, c])
+  const appendSymptom = (tag) => {
+    const cur = form.symptomTags || []
+    if (!cur.includes(tag)) set('symptomTags', [...cur, tag])
   }
 
-  const appendSymptom = (tag) => {
-    const cur = form.reason || ''
-    set('reason', cur ? `${cur.trimEnd()}, ${tag}` : tag)
+  const removeSymptom = (tag) => {
+    set('symptomTags', (form.symptomTags || []).filter((t) => t !== tag))
   }
 
   return (
@@ -552,17 +545,6 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
             className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
         )}
       </div>
-
-      {/* UHID (edit mode only) */}
-      {editMode && (
-        <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1">
-            <Lock className="w-3 h-3" /> UHID (read-only)
-          </label>
-          <input type="text" value={form.uhid || ''} readOnly
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-gray-100 text-gray-400 cursor-not-allowed font-mono" />
-        </div>
-      )}
 
       {/* Mobile */}
       <div>
@@ -618,50 +600,25 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
         </div>
       </div>
 
-      {/* Blood Group */}
+      {/* Symptom Tags */}
       <div>
-        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Blood Group <span className="text-gray-400 font-normal">(optional)</span></label>
-        <select value={form.bloodGroup || ''} onChange={(e) => set('bloodGroup', e.target.value)}
-          className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276] bg-white">
-          <option value="">Select blood group...</option>
-          {BLOOD_GROUPS.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
-      </div>
-
-      {/* Allergies */}
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Known Allergies <span className="text-gray-400 font-normal">(optional)</span></label>
-        <input type="text" placeholder="e.g. Penicillin, Dust, Pollen"
-          value={form.allergies || ''} onChange={(e) => set('allergies', e.target.value)}
-          className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
-      </div>
-
-      {/* Chronic Conditions */}
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 mb-2">Chronic Conditions <span className="text-gray-400 font-normal">(optional)</span></label>
-        <div className="flex flex-wrap gap-2">
-          {CHRONIC_CONDITIONS.map((c) => {
-            const sel = (form.chronicConditions || []).includes(c)
-            return (
-              <button key={c} type="button" onClick={() => toggleCondition(c)}
-                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
-                  sel ? 'border-[#1A5276] bg-[#EBF5FB] text-[#1A5276]' : 'border-[#E5E7EB] text-gray-600 hover:bg-[#F8F9FA]'
-                }`}>
-                {c}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Reason for Visit */}
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Reason for Visit *</label>
-        <textarea rows={3} placeholder="Describe the reason for visit..."
-          value={form.reason || ''} onChange={(e) => set('reason', e.target.value)}
-          className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276] resize-none" />
-        <div className="flex flex-wrap gap-1.5 mt-2">
-          {SYMPTOM_TAGS.map((tag) => (
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Symptom Tags <span className="text-gray-400 font-normal">(optional)</span></label>
+        {/* Selected tags */}
+        {(form.symptomTags || []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {(form.symptomTags || []).map((tag) => (
+              <span key={tag} className="inline-flex items-center gap-1 text-xs bg-[#EBF5FB] text-[#1A5276] border border-[#1A5276]/30 px-2.5 py-1 rounded-full font-medium">
+                {tag}
+                <button type="button" onClick={() => removeSymptom(tag)} className="hover:text-red-500">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Tag picker */}
+        <div className="flex flex-wrap gap-1.5">
+          {SYMPTOM_TAGS.filter((t) => !(form.symptomTags || []).includes(t)).map((tag) => (
             <button key={tag} type="button" onClick={() => appendSymptom(tag)}
               className="text-[10px] px-2.5 py-1 rounded-full border border-[#E5E7EB] text-gray-500 hover:bg-[#EBF5FB] hover:border-[#1A5276]/30 hover:text-[#1A5276] transition-all">
               {tag}
@@ -673,8 +630,7 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
       {/* Referral Source */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-0.5">How did you hear about us? <span className="text-gray-400 font-normal">(optional)</span></label>
-        <p className="text-[10px] text-gray-400 mb-2">Help us understand how patients find us</p>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 mt-2">
           {REFERRAL_SOURCES.map((src) => {
             const sel = form.referralSource === src
             return (
@@ -687,26 +643,6 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
               </button>
             )
           })}
-        </div>
-        {form.referralSource === 'Doctor Referral' && (
-          <input type="text" placeholder="Referring Doctor Name"
-            value={form.referringDoctor || ''} onChange={(e) => set('referringDoctor', e.target.value)}
-            className="mt-2 w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
-        )}
-      </div>
-
-      {/* Emergency Contact */}
-      <div>
-        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Emergency Contact <span className="text-gray-400 font-normal">(optional)</span></label>
-        <div className="grid grid-cols-2 gap-3">
-          <input type="text" placeholder="Contact Name"
-            value={form.emergencyContact?.name || ''}
-            onChange={(e) => set('emergencyContact', { ...form.emergencyContact, name: e.target.value })}
-            className="border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
-          <input type="tel" placeholder="Contact Number"
-            value={form.emergencyContact?.number || ''}
-            onChange={(e) => set('emergencyContact', { ...form.emergencyContact, number: e.target.value })}
-            className="border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
         </div>
       </div>
 
@@ -724,7 +660,8 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
             setForm((f) => ({
               ...f,
               name: ef.name, mobile: ef.mobile,
-              age: ef.age, reason: ef.reason,
+              age: ef.age,
+              symptomTags: ef.reason ? [ef.reason] : [],
               isEmergency: true,
             }))
             setShowEmergency(false)
@@ -739,37 +676,12 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
 
 function Step2Form({ form, setForm, isReturning }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-
-  const deptDoctors = DOCTORS.filter(
-    (d) => !form.department || d.specialty === form.department
-  )
+  const deptDoctors = DOCTORS.filter((d) => !form.department || d.specialty === form.department)
 
   const apptTypes = [
-    {
-      key: 'OPD',
-      title: 'OPD Consultation',
-      desc: 'Regular outpatient visit',
-      border: 'border-[#1A5276]',
-      bg: 'bg-[#EBF5FB]',
-      show: true,
-    },
-    {
-      key: 'Follow-up',
-      title: 'Follow-up Visit',
-      desc: 'Returning for same condition. Previous history will be shown to doctor.',
-      border: 'border-[#1A5276]',
-      bg: 'bg-[#EBF5FB]',
-      show: isReturning,
-    },
-    {
-      key: 'Emergency',
-      title: 'Emergency',
-      desc: 'Immediate attention required. Patient will be prioritized.',
-      border: 'border-red-500',
-      bg: 'bg-red-50',
-      show: true,
-      warning: 'Patient will skip queue',
-    },
+    { key: 'OPD',      title: 'OPD Consultation', desc: 'Regular outpatient visit',                                                border: 'border-[#1A5276]', bg: 'bg-[#EBF5FB]', show: true },
+    { key: 'Follow-up',title: 'Follow-up Visit',  desc: 'Returning for same condition.',                                           border: 'border-[#1A5276]', bg: 'bg-[#EBF5FB]', show: isReturning },
+    { key: 'Emergency', title: 'Emergency',        desc: 'Immediate attention required. Patient will be prioritized.',             border: 'border-red-500',   bg: 'bg-red-50',    show: true, warning: 'Patient will skip queue' },
   ].filter((t) => t.show)
 
   return (
@@ -778,7 +690,6 @@ function Step2Form({ form, setForm, isReturning }) {
         ℹ This step is for reception staff only
       </p>
 
-      {/* Appointment type cards */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-2">Appointment Type</label>
         <div className="space-y-2">
@@ -787,25 +698,17 @@ function Step2Form({ form, setForm, isReturning }) {
             return (
               <button key={t.key} type="button" onClick={() => set('apptType', t.key)}
                 className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
-                  sel
-                    ? `${t.border} ${t.bg}`
-                    : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
+                  sel ? `${t.border} ${t.bg}` : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
                 }`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className={`text-sm font-semibold ${
-                      sel
-                        ? t.key === 'Emergency' ? 'text-red-700' : 'text-[#1A5276]'
-                        : 'text-gray-800'
+                      sel ? t.key === 'Emergency' ? 'text-red-700' : 'text-[#1A5276]' : 'text-gray-800'
                     }`}>{t.title}</p>
                     <p className="text-[10px] text-gray-500 mt-0.5">{t.desc}</p>
-                    {sel && t.warning && (
-                      <p className="text-[10px] text-red-600 font-semibold mt-1">⚠ {t.warning}</p>
-                    )}
+                    {sel && t.warning && <p className="text-[10px] text-red-600 font-semibold mt-1">⚠ {t.warning}</p>}
                   </div>
-                  {sel && <CheckCircle2 className={`w-4 h-4 flex-shrink-0 ${
-                    t.key === 'Emergency' ? 'text-red-500' : 'text-[#1A5276]'
-                  }`} />}
+                  {sel && <CheckCircle2 className={`w-4 h-4 flex-shrink-0 ${t.key === 'Emergency' ? 'text-red-500' : 'text-[#1A5276]'}`} />}
                 </div>
               </button>
             )
@@ -813,7 +716,6 @@ function Step2Form({ form, setForm, isReturning }) {
         </div>
       </div>
 
-      {/* Department grid */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-2">Department *</label>
         <div className="grid grid-cols-3 gap-2">
@@ -825,30 +727,21 @@ function Step2Form({ form, setForm, isReturning }) {
               <button key={dept.name} type="button"
                 onClick={() => { set('department', dept.name); set('doctor', '') }}
                 className={`flex flex-col items-center gap-1 px-2 py-3 rounded-xl border-2 text-center transition-all ${
-                  sel
-                    ? 'border-[#1A5276] bg-[#1A5276] shadow-sm'
-                    : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
+                  sel ? 'border-[#1A5276] bg-[#1A5276] shadow-sm' : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
                 }`}>
                 <span className="text-xl">{meta.icon}</span>
-                <span className={`text-[10px] font-semibold leading-tight ${
-                  sel ? 'text-white' : 'text-gray-700'
-                }`}>{dept.name}</span>
-                <span className={`text-[9px] ${
-                  sel ? 'text-blue-200' : 'text-gray-400'
-                }`}>{docCount} doctor{docCount !== 1 ? 's' : ''}</span>
+                <span className={`text-[10px] font-semibold leading-tight ${sel ? 'text-white' : 'text-gray-700'}`}>{dept.name}</span>
+                <span className={`text-[9px] ${sel ? 'text-blue-200' : 'text-gray-400'}`}>{docCount} doctor{docCount !== 1 ? 's' : ''}</span>
               </button>
             )
           })}
         </div>
       </div>
 
-      {/* Doctor selector */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-1.5">Assign Doctor</label>
         <div className="space-y-2">
-          {deptDoctors.length === 0 && (
-            <p className="text-xs text-gray-400">Select a department first</p>
-          )}
+          {deptDoctors.length === 0 && <p className="text-xs text-gray-400">Select a department first</p>}
           {deptDoctors.map((d) => {
             const sel = form.doctor === d.name
             return (
@@ -858,9 +751,7 @@ function Step2Form({ form, setForm, isReturning }) {
                 }`}>
                 <span className={`w-2 h-2 rounded-full flex-shrink-0 ${DOCTOR_STATUS_DOT[d.status] || 'bg-gray-400'}`} />
                 <div className="flex-1 text-left">
-                  <p className={`text-sm font-semibold ${
-                    sel ? 'text-[#1A5276]' : 'text-gray-800'
-                  }`}>{d.name}</p>
+                  <p className={`text-sm font-semibold ${sel ? 'text-[#1A5276]' : 'text-gray-800'}`}>{d.name}</p>
                   <p className="text-[10px] text-gray-400">{d.specialty} · Queue: {d.patients}</p>
                 </div>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
@@ -877,14 +768,10 @@ function Step2Form({ form, setForm, isReturning }) {
         </div>
       </div>
 
-      {/* Time slot */}
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-2">Time Slot</label>
         <div className="grid grid-cols-2 gap-3">
-          {[
-            { key: 'morning', label: 'Morning', sub: '9AM – 1PM' },
-            { key: 'evening', label: 'Evening', sub: '4PM – 8PM' },
-          ].map((slot) => {
+          {[{ key: 'morning', label: 'Morning', sub: '9AM – 1PM' }, { key: 'evening', label: 'Evening', sub: '4PM – 8PM' }].map((slot) => {
             const sel = form.timeSlot === slot.key
             return (
               <button key={slot.key} type="button" onClick={() => set('timeSlot', slot.key)}
@@ -892,12 +779,8 @@ function Step2Form({ form, setForm, isReturning }) {
                   sel ? 'border-[#1A5276] bg-[#EBF5FB]' : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
                 }`}>
                 <span className="text-lg">{slot.key === 'morning' ? '🌅' : '🌆'}</span>
-                <span className={`text-sm font-semibold mt-1 ${
-                  sel ? 'text-[#1A5276]' : 'text-gray-700'
-                }`}>{slot.label}</span>
-                <span className={`text-[10px] ${
-                  sel ? 'text-[#1A5276]/70' : 'text-gray-400'
-                }`}>{slot.sub}</span>
+                <span className={`text-sm font-semibold mt-1 ${sel ? 'text-[#1A5276]' : 'text-gray-700'}`}>{slot.label}</span>
+                <span className={`text-[10px] ${sel ? 'text-[#1A5276]/70' : 'text-gray-400'}`}>{slot.sub}</span>
               </button>
             )
           })}
@@ -910,10 +793,8 @@ function Step2Form({ form, setForm, isReturning }) {
 // ─── Main Modal ───────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
-  name: '', mobile: '', dob: '', gender: 'Male', reason: '',
-  bloodGroup: '', allergies: '', chronicConditions: [],
-  referralSource: '', referringDoctor: '',
-  emergencyContact: { name: '', number: '' },
+  name: '', mobile: '', dob: '', gender: 'Male',
+  symptomTags: [], referralSource: '',
   department: '', doctor: '', apptType: 'OPD', timeSlot: 'morning',
   isEmergency: false,
 }
@@ -921,23 +802,27 @@ const EMPTY_FORM = {
 function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
   const isEditMode = !!editPatient
 
-  const [mode, setMode]   = useState('new')   // 'new' | 'returning'
+  const [mode, setMode]   = useState('new')
   const [step, setStep]   = useState(1)
   const [form, setForm]   = useState(
     isEditMode
       ? {
           ...EMPTY_FORM,
-          ...editPatient,
-          mobile: editPatient.contact || '',
-          emergencyContact: editPatient.emergencyContact || { name: '', number: '' },
-          chronicConditions: editPatient.chronicConditions || [],
+          name:          editPatient.full_name || editPatient.name || '',
+          mobile:        editPatient.mobile_number || editPatient.contact || '',
+          dob:           editPatient.date_of_birth || editPatient.dob || '',
+          gender:        editPatient.gender || 'Male',
+          symptomTags:   editPatient.symptom_tags || [],
+          referralSource: editPatient.referral_source || editPatient.referralSource || '',
+          isEmergency:   editPatient.is_emergency || false,
         }
       : EMPTY_FORM
   )
-  const [token, setToken]       = useState('')
-  const [uhid, setUhid]         = useState('')
+  const [token, setToken]             = useState('')
   const [isReturning, setIsReturning] = useState(false)
   const [returnPatient, setReturnPatient] = useState(null)
+  const [submitError, setSubmitError] = useState('')
+  const [submitting, setSubmitting]   = useState(false)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -946,56 +831,54 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
     setIsReturning(true)
     setForm({
       ...EMPTY_FORM,
-      name:              p.name,
-      mobile:            p.contact,
-      dob:               p.dob || '',
-      gender:            p.gender,
-      bloodGroup:        p.bloodGroup || '',
-      allergies:         p.allergies || '',
-      chronicConditions: p.chronicConditions || [],
-      referralSource:    p.referralSource || '',
-      referringDoctor:   p.referringDoctor || '',
-      emergencyContact:  p.emergencyContact || { name: '', number: '' },
-      uhid:              p.uhid,
-      reason:            '',
-      department:        '',
-      doctor:            '',
-      apptType:          'Follow-up',
-      timeSlot:          'morning',
+      name:          p.full_name || '',
+      mobile:        p.mobile_number || '',
+      dob:           p.date_of_birth || '',
+      gender:        p.gender || 'Male',
+      symptomTags:   [],
+      referralSource: p.referral_source || '',
+      apptType:      'Follow-up',
+      timeSlot:      'morning',
     })
     setStep(1)
   }
 
-  const mobileOk = form.mobile ? validateMobile(form.mobile).valid : false
-  const dobErr   = form.dob ? validateDob(form.dob) : null
-  const step1Valid = form.name && mobileOk && form.dob && !dobErr && form.reason
+  const mobileOk  = form.mobile ? validateMobile(form.mobile).valid : false
+  const dobErr    = form.dob ? validateDob(form.dob) : null
+  const step1Valid = form.name && mobileOk && form.dob && !dobErr
 
-  const handleBook = () => {
-    const num = String(Math.floor(Math.random() * 900) + 11).padStart(3, '0')
-    const tok = `T-${num}`
-    const newUhid = isReturning
-      ? (returnPatient?.uhid || form.uhid || '')
-      : generateUHID(allPatients.length)
-    setToken(tok)
-    setUhid(newUhid)
-    if (isEditMode) {
-      onUpdate && onUpdate({ ...editPatient, ...form, contact: form.mobile })
-    } else {
-      onAdd && onAdd({
-        ...form,
-        token: tok,
-        uhid: newUhid,
-        contact: form.mobile,
-        status: form.isEmergency ? 'Emergency' : 'Waiting',
-        isReturning,
-      })
+  // Called when the user clicks "Generate Token & Book" on step 2
+  const handleBook = async () => {
+    setSubmitError('')
+    setSubmitting(true)
+    try {
+      const tok = `T-${String(Math.floor(Math.random() * 900) + 11).padStart(3, '0')}`
+      setToken(tok)
+
+      if (isEditMode) {
+        await onUpdate({ ...editPatient, ...form })
+      } else {
+        await onAdd({ ...form, token: tok, isReturning })
+      }
+      setStep(3)
+    } catch (err) {
+      setSubmitError(err.message || 'Something went wrong. Please try again.')
+    } finally {
+      setSubmitting(false)
     }
-    setStep(3)
   }
 
-  const handleSaveEdit = () => {
-    onUpdate && onUpdate({ ...editPatient, ...form, contact: form.mobile })
-    onClose()
+  const handleSaveEdit = async () => {
+    setSubmitError('')
+    setSubmitting(true)
+    try {
+      await onUpdate({ ...editPatient, ...form })
+      onClose()
+    } catch (err) {
+      setSubmitError(err.message || 'Something went wrong. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -1014,35 +897,27 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
           <div>
             {isEditMode ? (
               <>
-                <h3 className="text-base font-bold text-gray-900">
-                  Editing Patient: {editPatient.name}
-                </h3>
-                <p className="text-xs text-gray-400 font-mono mt-0.5">{editPatient.uhid}</p>
+                <h3 className="text-base font-bold text-gray-900">Editing Patient: {editPatient.full_name || editPatient.name}</h3>
               </>
             ) : (
               <>
                 <h3 className="text-base font-bold text-gray-900">Register Patient</h3>
-                {step < 3 && (
-                  <p className="text-xs text-gray-500 mt-0.5">Step {step} of {STEPS.length}</p>
-                )}
+                {step < 3 && <p className="text-xs text-gray-500 mt-0.5">Step {step} of {STEPS.length}</p>}
               </>
             )}
           </div>
-          <button onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Mode tabs (new registration only, step 1) */}
+        {/* Mode tabs */}
         {!isEditMode && step === 1 && (
           <div className="flex border-b border-[#E5E7EB] px-6 flex-shrink-0">
             {['new', 'returning'].map((m) => (
               <button key={m} onClick={() => { setMode(m); setIsReturning(false); setReturnPatient(null); setForm(EMPTY_FORM) }}
                 className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all ${
-                  mode === m
-                    ? 'border-[#1A5276] text-[#1A5276]'
-                    : 'border-transparent text-gray-400 hover:text-gray-600'
+                  mode === m ? 'border-[#1A5276] text-[#1A5276]' : 'border-transparent text-gray-400 hover:text-gray-600'
                 }`}>
                 {m === 'new' ? 'New Patient' : 'Returning Patient'}
               </button>
@@ -1051,56 +926,48 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
         )}
 
         <div className="px-6 pt-5 pb-6 overflow-y-auto flex-1">
+          {/* Supabase error banner */}
+          {submitError && (
+            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-4">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-700">{submitError}</p>
+            </div>
+          )}
+
           {/* Returning patient search */}
           {!isEditMode && mode === 'returning' && step === 1 && !isReturning && (
             <ReturningSearch allPatients={allPatients} onSelect={handleSelectReturning} />
           )}
 
-          {/* Returning patient selected — show badge + last visit */}
+          {/* Returning patient selected badge */}
           {!isEditMode && isReturning && returnPatient && step === 1 && (
             <div className="mb-4 space-y-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full">
-                  ✓ Returning Patient
-                </span>
+                <span className="text-xs font-semibold bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full">✓ Returning Patient</span>
                 <button onClick={() => { setIsReturning(false); setReturnPatient(null); setForm(EMPTY_FORM) }}
                   className="text-[10px] text-gray-400 hover:text-gray-600 underline">Change</button>
               </div>
-              {returnPatient.lastVisit && (
-                <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3">
-                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide">Last Visit Summary</p>
-                  <p className="text-xs text-blue-800 font-medium mt-1">{returnPatient.lastVisit.date}</p>
-                  <p className="text-[10px] text-blue-600">{returnPatient.lastVisit.doctor}</p>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Show form steps when: new mode, or returning + patient selected */}
           {(mode === 'new' || isReturning || isEditMode) && (
             <>
               {!isEditMode && <ProgressBar step={step} />}
 
-              {/* Step 1 */}
               {step === 1 && (
                 <>
                   <p className="text-sm font-bold text-gray-800 mb-4">Patient Information</p>
-                  <Step1Form
-                    form={form} setForm={setForm}
-                    isReturning={isReturning} editMode={isEditMode}
-                  />
+                  <Step1Form form={form} setForm={setForm} isReturning={isReturning} editMode={isEditMode} />
                   <div className="mt-5 space-y-2">
                     {isEditMode ? (
-                      <button onClick={handleSaveEdit}
-                        className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors">
-                        <CheckCircle2 className="w-4 h-4" /> Save Changes
+                      <button onClick={handleSaveEdit} disabled={submitting}
+                        className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-60">
+                        {submitting ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                        {submitting ? 'Saving...' : 'Save Changes'}
                       </button>
                     ) : (
-                      <button
-                        onClick={() => setStep(2)}
-                        disabled={!step1Valid}
-                        className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
+                      <button onClick={() => setStep(2)} disabled={!step1Valid}
+                        className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                         Next Step <ChevronRight className="w-4 h-4" />
                       </button>
                     )}
@@ -1108,7 +975,6 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
                 </>
               )}
 
-              {/* Step 2 */}
               {step === 2 && (
                 <>
                   <p className="text-sm font-bold text-gray-800 mb-4">Appointment Details</p>
@@ -1118,46 +984,33 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
                       className="flex-1 border border-[#E5E7EB] text-gray-600 text-sm font-medium py-2.5 rounded-lg hover:bg-[#F8F9FA] transition-colors">
                       Back
                     </button>
-                    <button
-                      onClick={handleBook}
-                      disabled={!form.department}
-                      className="flex-1 flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      <Calendar className="w-4 h-4" />
-                      Generate Token &amp; Book
+                    <button onClick={handleBook} disabled={!form.department || submitting}
+                      className="flex-1 flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                      {submitting ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <Calendar className="w-4 h-4" />}
+                      {submitting ? 'Saving...' : 'Generate Token & Book'}
                     </button>
                   </div>
                 </>
               )}
 
-              {/* Step 3 — Confirmation */}
               {step === 3 && (
                 <div className="flex flex-col items-center text-center py-4 space-y-5">
                   <div className={`w-28 h-28 rounded-full border-4 flex flex-col items-center justify-center ${
-                    form.isEmergency
-                      ? 'bg-red-50 border-red-500'
-                      : 'bg-[#EBF5FB] border-[#1A5276]'
+                    form.isEmergency ? 'bg-red-50 border-red-500' : 'bg-[#EBF5FB] border-[#1A5276]'
                   }`}>
-                    <p className={`text-[10px] font-semibold uppercase tracking-widest ${
-                      form.isEmergency ? 'text-red-600' : 'text-[#1A5276]'
-                    }`}>Token</p>
-                    <p className={`text-3xl font-black leading-none mt-0.5 ${
-                      form.isEmergency ? 'text-red-600' : 'text-[#1A5276]'
-                    }`}>{token}</p>
-                    {form.isEmergency && (
-                      <span className="text-[9px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full mt-1 animate-pulse">EMERGENCY</span>
-                    )}
+                    <p className={`text-[10px] font-semibold uppercase tracking-widest ${form.isEmergency ? 'text-red-600' : 'text-[#1A5276]'}`}>Token</p>
+                    <p className={`text-3xl font-black leading-none mt-0.5 ${form.isEmergency ? 'text-red-600' : 'text-[#1A5276]'}`}>{token}</p>
+                    {form.isEmergency && <span className="text-[9px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full mt-1 animate-pulse">EMERGENCY</span>}
                   </div>
 
                   <div>
                     <h4 className="text-lg font-bold text-gray-900">{form.name}</h4>
-                    <p className="text-xs font-mono text-gray-400 mt-0.5">{uhid}</p>
                     <p className="text-sm text-gray-500 mt-1">
                       {form.department} · {form.doctor || 'Doctor TBD'} · {form.timeSlot === 'morning' ? 'Morning 9AM–1PM' : 'Evening 4PM–8PM'}
                     </p>
                     {isReturning && (
                       <span className="inline-block mt-2 text-xs font-semibold bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full">
-                        ✓ Returning Patient — No new UHID generated
+                        ✓ Returning Patient
                       </span>
                     )}
                   </div>
@@ -1165,19 +1018,16 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
                   <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 w-full">
                     <CheckCircle2 className="w-4 h-4 text-[#1E8449] flex-shrink-0" />
                     <div className="text-left">
-                      <p className="text-xs font-semibold text-green-800">Registration successful</p>
-                      <p className="text-[10px] text-green-600 mt-0.5">
-                        WhatsApp confirmation sent to {form.mobile || "patient's mobile"}
-                      </p>
+                      <p className="text-xs font-semibold text-green-800">Registration successful — saved to Supabase</p>
+                      <p className="text-[10px] text-green-600 mt-0.5">Patient record created in your hospital's database</p>
                     </div>
                     <MessageCircle className="w-4 h-4 text-[#25D366] ml-auto flex-shrink-0" />
                   </div>
 
                   <div className="flex gap-3 w-full">
                     <button
-                      onClick={() => { setStep(1); setForm(EMPTY_FORM); setMode('new'); setIsReturning(false); setReturnPatient(null) }}
-                      className="flex-1 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors"
-                    >
+                      onClick={() => { setStep(1); setForm(EMPTY_FORM); setMode('new'); setIsReturning(false); setReturnPatient(null); setSubmitError('') }}
+                      className="flex-1 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors">
                       Register Another Patient
                     </button>
                     <button onClick={onClose}
@@ -1197,56 +1047,179 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const DEFAULT_PATIENT = PATIENTS.find((p) => p.name === 'Anjali Mehta') || PATIENTS[0]
-
 export default function Reception() {
-  const [patients, setPatients]   = useState(PATIENTS)
-  const [selected, setSelected]   = useState(DEFAULT_PATIENT)
-  const [showModal, setShowModal] = useState(false)
+  // Get the logged-in staff member's profile (hospital_id, role, id)
+  const { profile } = useAuth()
+
+  const [patients, setPatients]       = useState([])
+  const [selected, setSelected]       = useState(null)
+  const [showModal, setShowModal]     = useState(false)
   const [editPatient, setEditPatient] = useState(null)
+  const [loadError, setLoadError]     = useState('')
+  const [loading, setLoading]         = useState(true)
 
-  const handleAddPatient = (formData) => {
-    const age = formData.dob ? calcAge(formData.dob) : (parseInt(formData.age) || 0)
-    const newPatient = {
-      id:                patients.length + 1,
-      token:             formData.token,
-      uhid:              formData.uhid,
-      name:              formData.name,
-      age,
-      dob:               formData.dob || '',
-      gender:            formData.gender,
-      department:        formData.department,
-      status:            formData.status || 'Waiting',
-      contact:           formData.contact || formData.mobile,
-      reason:            formData.reason,
-      bloodGroup:        formData.bloodGroup || '—',
-      allergies:         formData.allergies || 'None',
-      chronicConditions: formData.chronicConditions || [],
-      referralSource:    formData.referralSource || '',
-      referringDoctor:   formData.referringDoctor || '',
-      emergencyContact:  formData.emergencyContact || { name: '', number: '' },
-      lastVisit:         null,
+  // ── Load patients from Supabase on mount ────────────────────────────────
+  // RLS automatically filters to only this hospital's patients.
+  // We order by created_at DESC so newest patients appear first.
+  const loadPatients = useCallback(async () => {
+    setLoadError('')
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setPatients(data || [])
+      if (data && data.length > 0) setSelected(data[0])
+    } catch (err) {
+      console.error('Failed to load patients:', err)
+      setLoadError('Failed to load patients. Please check your connection and try again.')
+    } finally {
+      setLoading(false)
     }
+  }, [])
+
+  useEffect(() => {
+    loadPatients()
+  }, [loadPatients])
+
+  // ── Add new patient ─────────────────────────────────────────────────────
+  // Steps:
+  // 1. Validate mobile format (already done in form, double-check here)
+  // 2. For new patients: check no duplicate mobile in this hospital
+  // 3. INSERT into patients table
+  // 4. INSERT into audit_logs
+  const handleAddPatient = useCallback(async (formData) => {
+    if (!profile?.hospital_id) {
+      throw new Error('Your account is not linked to a hospital. Contact your administrator.')
+    }
+
+    // Sanitize inputs before sending to Supabase
+    const fullName    = sanitizeText(formData.name)
+    const mobile      = validateMobile(formData.mobile).stripped
+    const dob         = formData.dob
+    const gender      = sanitizeText(formData.gender)
+    const symptomTags = (formData.symptomTags || []).map(sanitizeText).filter(Boolean)
+    const referral    = sanitizeText(formData.referralSource)
+    const isEmergency = !!formData.isEmergency
+    const patientType = formData.isReturning ? 'returning' : 'new'
+
+    // Duplicate mobile check for NEW patients within the same hospital
+    if (patientType === 'new') {
+      const { count, error: dupError } = await supabase
+        .from('patients')
+        .select('id', { count: 'exact', head: true })
+        .eq('hospital_id', profile.hospital_id)
+        .eq('mobile_number', mobile)
+
+      if (dupError) throw new Error('Could not verify mobile number uniqueness. Please try again.')
+      if (count > 0) {
+        throw new Error(
+          `A patient with mobile number ${mobile} is already registered at this hospital. ` +
+          'Use the "Returning Patient" tab to book a follow-up.'
+        )
+      }
+    }
+
+    // INSERT the new patient row
+    const { data: newPatient, error: insertError } = await supabase
+      .from('patients')
+      .insert({
+        hospital_id:    profile.hospital_id,
+        patient_type:   patientType,
+        full_name:      fullName,
+        mobile_number:  mobile,
+        date_of_birth:  dob,
+        gender,
+        symptom_tags:   symptomTags,
+        referral_source: referral || null,
+        is_emergency:   isEmergency,
+        registered_by:  profile.id,
+      })
+      .select()
+      .single()
+
+    if (insertError) {
+      throw new Error(`Failed to register patient: ${insertError.message}`)
+    }
+
+    // INSERT audit log entry — logs are immutable (no UPDATE/DELETE via RLS)
+    const { error: auditError } = await supabase
+      .from('audit_logs')
+      .insert({
+        hospital_id:  profile.hospital_id,
+        staff_id:     profile.id,
+        action:       'created_patient',
+        target_table: 'patients',
+        target_id:    newPatient.id,
+        details: {
+          patient_name: fullName,
+          mobile,
+          patient_type: patientType,
+          is_emergency: isEmergency,
+          token:        formData.token,
+        },
+      })
+
+    if (auditError) {
+      // Audit log failure is non-fatal — patient was saved, just log the warning
+      console.warn('Audit log insert failed:', auditError.message)
+    }
+
+    // Add the new patient to local state with the token for display
+    const patientWithToken = {
+      ...newPatient,
+      token:  formData.token,
+      status: isEmergency ? 'Emergency' : 'Waiting',
+    }
+
     // Emergency patients go to top of queue
-    if (formData.status === 'Emergency') {
-      setPatients((prev) => [newPatient, ...prev])
+    if (isEmergency) {
+      setPatients((prev) => [patientWithToken, ...prev])
     } else {
-      setPatients((prev) => [...prev, newPatient])
+      setPatients((prev) => [patientWithToken, ...prev])
     }
-    setSelected(newPatient)
-  }
+    setSelected(patientWithToken)
+  }, [profile])
 
-  const handleUpdatePatient = (updated) => {
-    setPatients((prev) => prev.map((p) => p.id === updated.id ? { ...p, ...updated } : p))
-    setSelected((s) => s?.id === updated.id ? { ...s, ...updated } : s)
+  // ── Update existing patient ─────────────────────────────────────────────
+  const handleUpdatePatient = useCallback(async (updated) => {
+    const fullName    = sanitizeText(updated.name || updated.full_name)
+    const mobile      = validateMobile(updated.mobile || updated.mobile_number || '').stripped
+    const gender      = sanitizeText(updated.gender)
+    const symptomTags = (updated.symptomTags || updated.symptom_tags || []).map(sanitizeText).filter(Boolean)
+    const referral    = sanitizeText(updated.referralSource || updated.referral_source)
+
+    const { error } = await supabase
+      .from('patients')
+      .update({
+        full_name:       fullName,
+        mobile_number:   mobile,
+        date_of_birth:   updated.dob || updated.date_of_birth,
+        gender,
+        symptom_tags:    symptomTags,
+        referral_source: referral || null,
+        is_emergency:    !!updated.isEmergency,
+      })
+      .eq('id', updated.id)
+
+    if (error) throw new Error(`Failed to update patient: ${error.message}`)
+
+    // Reflect changes in local state
+    const merged = { ...updated, full_name: fullName, mobile_number: mobile, symptom_tags: symptomTags }
+    setPatients((prev) => prev.map((p) => p.id === updated.id ? merged : p))
+    setSelected((s) => s?.id === updated.id ? merged : s)
     setEditPatient(null)
     setShowModal(false)
-  }
+  }, [])
 
-  const handleSendToOPD = (id) => {
+  const handleSendToOPD = useCallback((id) => {
+    // Status update is local-only for now (OPD module not yet connected to Supabase)
     setPatients((prev) => prev.map((p) => p.id === id ? { ...p, status: 'SentToOPD' } : p))
     setSelected((s) => s?.id === id ? { ...s, status: 'SentToOPD' } : s)
-  }
+  }, [])
 
   const handleEdit = (patient) => {
     setEditPatient(patient)
@@ -1277,24 +1250,47 @@ export default function Reception() {
           </button>
         </div>
 
+        {/* Load error banner */}
+        {loadError && (
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex-shrink-0">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-red-700">{loadError}</p>
+            </div>
+            <button onClick={loadPatients} className="text-xs font-semibold text-red-600 hover:underline flex-shrink-0">Retry</button>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loading && (
+          <div className="flex items-center justify-center py-8">
+            <span className="w-5 h-5 border-2 border-gray-200 border-t-[#1A5276] rounded-full animate-spin" />
+            <span className="ml-2 text-sm text-gray-400">Loading patients...</span>
+          </div>
+        )}
+
         {/* Doctor availability strip */}
-        <div className="flex-shrink-0">
-          <DoctorStrip />
-        </div>
+        {!loading && (
+          <div className="flex-shrink-0">
+            <DoctorStrip />
+          </div>
+        )}
 
         {/* Split layout */}
-        <div className="grid grid-cols-5 gap-4 flex-1 min-h-0">
-          <div className="col-span-2 min-h-0">
-            <QueueList patients={patients} selected={selected} onSelect={setSelected} />
+        {!loading && (
+          <div className="grid grid-cols-5 gap-4 flex-1 min-h-0">
+            <div className="col-span-2 min-h-0">
+              <QueueList patients={patients} selected={selected} onSelect={setSelected} />
+            </div>
+            <div className="col-span-3 min-h-0">
+              <PatientDetail
+                patient={selected}
+                onEdit={handleEdit}
+                onSendToOPD={handleSendToOPD}
+              />
+            </div>
           </div>
-          <div className="col-span-3 min-h-0">
-            <PatientDetail
-              patient={selected}
-              onEdit={handleEdit}
-              onSendToOPD={handleSendToOPD}
-            />
-          </div>
-        </div>
+        )}
       </div>
 
       {showModal && (
