@@ -3,13 +3,8 @@
  * ---------
  * Email + password login page for MediCore staff.
  *
- * - Calls supabase.auth.signInWithPassword via the AuthContext signIn helper
- * - Displays a clear error message for wrong credentials
- * - On success, AuthContext updates the user state and App.jsx redirects
- *   the user to the dashboard automatically
- *
- * NOTE: There is no public "Sign Up" link here. Staff accounts are created
- * by admins only (Hospital Admin or Super Admin) from within the app.
+ * Also displays the deactivatedMessage from AuthContext when a session
+ * is force-ended due to an inactive account or hospital (Fix 2).
  */
 
 import { useState } from 'react'
@@ -17,7 +12,7 @@ import { useAuth } from '../context/AuthContext'
 import { Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react'
 
 export default function Login() {
-  const { signIn } = useAuth()
+  const { signIn, deactivatedMessage } = useAuth()
 
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
@@ -29,7 +24,6 @@ export default function Login() {
     e.preventDefault()
     setError('')
 
-    // Basic client-side validation before hitting Supabase
     if (!email.trim() || !password) {
       setError('Please enter your email and password.')
       return
@@ -40,7 +34,6 @@ export default function Login() {
     setLoading(false)
 
     if (authError) {
-      // Supabase returns generic messages; map them to user-friendly text
       if (authError.message.toLowerCase().includes('invalid login')) {
         setError('Incorrect email or password. Please try again.')
       } else if (authError.message.toLowerCase().includes('email not confirmed')) {
@@ -49,8 +42,11 @@ export default function Login() {
         setError(authError.message)
       }
     }
-    // On success, AuthContext sets user → App.jsx redirects to dashboard
   }
+
+  // Show deactivation message (from AuthContext) OR a login error, not both
+  const displayMessage = deactivatedMessage || error
+  const isDeactivated  = !!deactivatedMessage && !error
 
   return (
     <div
@@ -58,7 +54,6 @@ export default function Login() {
       style={{ backgroundColor: '#F0F4F8', fontFamily: 'Inter, system-ui, sans-serif' }}
     >
       <div className="w-full max-w-md">
-        {/* Logo / branding */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#1A5276] mb-4 shadow-lg">
             <span className="text-white text-2xl font-black">M</span>
@@ -67,27 +62,29 @@ export default function Login() {
           <p className="text-sm text-gray-500 mt-1">Hospital Management System</p>
         </div>
 
-        {/* Login card */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
           <h2 className="text-lg font-bold text-gray-900 mb-1">Staff Login</h2>
-          <p className="text-xs text-gray-500 mb-6">
-            Sign in with your hospital-issued credentials
-          </p>
+          <p className="text-xs text-gray-500 mb-6">Sign in with your hospital-issued credentials</p>
 
-          {/* Error banner */}
-          {error && (
-            <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5">
-              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-700">{error}</p>
+          {/* Error / deactivation banner */}
+          {displayMessage && (
+            <div className={`flex items-start gap-3 rounded-lg px-4 py-3 mb-5 border ${
+              isDeactivated
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-red-50 border-red-200'
+            }`}>
+              <AlertCircle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                isDeactivated ? 'text-amber-500' : 'text-red-500'
+              }`} />
+              <p className={`text-sm ${
+                isDeactivated ? 'text-amber-700' : 'text-red-700'
+              }`}>{displayMessage}</p>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-            {/* Email */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Email Address
-              </label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Email Address</label>
               <input
                 type="email"
                 autoComplete="email"
@@ -99,16 +96,13 @@ export default function Login() {
               />
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Password
-              </label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Password</label>
               <div className="relative">
                 <input
                   type={showPw ? 'text' : 'password'}
                   autoComplete="current-password"
-                  placeholder="••••••••"
+                  placeholder="........"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={loading}
@@ -125,7 +119,6 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
