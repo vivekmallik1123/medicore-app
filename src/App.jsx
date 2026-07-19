@@ -116,10 +116,18 @@ export default function App() {
 
   // Stage 2b: session exists but is_active checks not yet complete
   // (the window between setUser() and fetchProfile() resolving).
-  // EXCEPTION: if signingIn is true, Login.jsx is already showing its own
-  // inline spinner — do NOT replace it with LoadingScreen, which would
-  // unmount the login page and cause a visible navigation flash.
-  if (!authReady && !signingIn) return <LoadingScreen />
+  //
+  // When signingIn is true, Login.jsx is mounted and showing its own inline
+  // button spinner. We must NOT render anything else here — not LoadingScreen
+  // (which would unmount Login.jsx causing a visible flash) and critically
+  // NOT AppLayout (which would briefly show the dashboard before the
+  // is_active check completes). Returning null renders a blank screen that
+  // is invisible to the user because Login.jsx is still in the DOM.
+  //
+  // When signingIn is false but authReady is still false (e.g. a session
+  // is being restored on page load after the initial loading phase), show
+  // LoadingScreen as a safe fallback.
+  if (!authReady) return signingIn ? null : <LoadingScreen />
 
   // Stage 3: fully authorized → render the app
   return <AppLayout />

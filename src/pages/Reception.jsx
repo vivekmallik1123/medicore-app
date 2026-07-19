@@ -331,6 +331,9 @@ function PatientDetail({ patient, onEdit, onSendToOPD }) {
           <div className="bg-[#F8F9FA] border border-[#E5E7EB] rounded-lg px-4 py-3">
             <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Referral Source</p>
             <p className="text-sm text-gray-700">{referral}</p>
+            {patient.referring_doctor_name && (
+              <p className="text-xs text-gray-500 mt-1">Referring Doctor: {patient.referring_doctor_name}</p>
+            )}
           </div>
         )}
 
@@ -620,7 +623,12 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
           {REFERRAL_SOURCES.map((src) => {
             const sel = form.referralSource === src
             return (
-              <button key={src} type="button" onClick={() => set('referralSource', sel ? '' : src)}
+              <button key={src} type="button"
+                onClick={() => {
+                  const next = sel ? '' : src
+                  set('referralSource', next)
+                  if (src === 'Doctor Referral' && sel) set('referringDoctorName', '')
+                }}
                 className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
                   sel ? 'border-[#1A5276] bg-[#EBF5FB] text-[#1A5276]' : 'border-[#E5E7EB] text-gray-600 hover:bg-[#F8F9FA]'
                 }`}>
@@ -629,6 +637,23 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
             )
           })}
         </div>
+        {form.referralSource === 'Doctor Referral' && (
+          <div className="mt-3">
+            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+              Referring Doctor Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Dr. Mehta (Family Physician)"
+              value={form.referringDoctorName || ''}
+              onChange={(e) => set('referringDoctorName', e.target.value)}
+              className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]"
+            />
+            {!form.referringDoctorName?.trim() && (
+              <p className="text-xs text-amber-600 mt-1">Required when Doctor Referral is selected</p>
+            )}
+          </div>
+        )}
       </div>
 
       {!editMode && !showEmergency && (
@@ -786,7 +811,7 @@ function Step2Form({ form, setForm, isReturning }) {
 
 const EMPTY_FORM = {
   name: '', mobile: '', dob: '', gender: 'Male',
-  symptomTags: [], referralSource: '',
+  symptomTags: [], referralSource: '', referringDoctorName: '',
   department: '', doctor: '', apptType: 'OPD', timeSlot: 'morning',
   isEmergency: false,
 }
@@ -800,13 +825,14 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
     isEditMode
       ? {
           ...EMPTY_FORM,
-          name:           editPatient.full_name || '',
-          mobile:         editPatient.mobile_number || '',
-          dob:            editPatient.date_of_birth || '',
-          gender:         editPatient.gender || 'Male',
-          symptomTags:    editPatient.symptom_tags || [],
-          referralSource: editPatient.referral_source || '',
-          isEmergency:    editPatient.is_emergency || false,
+          name:                editPatient.full_name || '',
+          mobile:              editPatient.mobile_number || '',
+          dob:                 editPatient.date_of_birth || '',
+          gender:              editPatient.gender || 'Male',
+          symptomTags:         editPatient.symptom_tags || [],
+          referralSource:      editPatient.referral_source || '',
+          referringDoctorName: editPatient.referring_doctor_name || '',
+          isEmergency:         editPatient.is_emergency || false,
         }
       : EMPTY_FORM
   )
@@ -815,6 +841,9 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
   const [returnPatient, setReturnPatient] = useState(null)
   const [submitError, setSubmitError] = useState('')
   const [submitting, setSubmitting]   = useState(false)
+  // Step 1 → Step 2 transition: mobile duplicate check
+  const [mobileCheckError, setMobileCheckError] = useState('')
+  const [mobileChecking, setMobileChecking]     = useState(false)
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -838,7 +867,41 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
   // Fix 6: same validation rules for both create and edit flows
   const mobileOk   = form.mobile ? validateMobile(form.mobile).valid : false
   const dobErr     = form.dob ? validateDob(form.dob) : null
-  const step1Valid = sanitizeText(form.name).length > 0 && mobileOk && !!form.dob && !dobErr
+  // Referring doctor name is required when referral source is 'Doctor Referral'
+  const doctorNameOk = form.referralSource !== 'Doctor Referral' || !!sanitizeText(form.referringDoctorName)
+  const step1Valid = sanitizeText(form.name).length > 0 && mobileOk && !!form.dob && !dobErr && doctorNameOk
+
+  // Run the Supabase duplicate-mobile check before advancing to Step 2.
+  // Gives the user immediate feedback on Step 1 rather than waiting until
+  // they submit the full form on Step 2.
+  const handleNextStep = async () => {
+    setMobileCheckError('')
+    if (!isReturning) {
+      const mobile = validateMobile(form.mobile).stripped
+      setMobileChecking(true)
+      try {
+        const { count, error: dupError } = await supabase
+          .from('patients')
+          .select('id', { count: 'exact', head: true })
+          .eq('hospital_id', profile?.hospital_id)
+          .eq('mobile_number', mobile)
+        if (dupError) throw dupError
+        if (count > 0) {
+          setMobileCheckError(
+            `A patient with mobile number ${mobile} is already registered at this hospital. ` +
+            'Use the "Returning Patient" tab to book a follow-up.'
+          )
+          return
+        }
+      } catch {
+        setMobileCheckError('Could not verify mobile number uniqueness. Please try again.')
+        return
+      } finally {
+        setMobileChecking(false)
+      }
+    }
+    setStep(2)
+  }
 
   const handleBook = async () => {
     setSubmitError('')
@@ -942,18 +1005,27 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
                 <>
                   <p className="text-sm font-bold text-gray-800 mb-4">Patient Information</p>
                   <Step1Form form={form} setForm={setForm} isReturning={isReturning} editMode={isEditMode} />
+                  {mobileCheckError && (
+                    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 mt-3">
+                      <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-700">{mobileCheckError}</p>
+                    </div>
+                  )}
                   <div className="mt-5">
                     {isEditMode ? (
-                      // Fix 6: Save Changes disabled if validation fails
                       <button onClick={handleSaveEdit} disabled={submitting || !step1Valid}
                         className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                         {submitting ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                         {submitting ? 'Saving...' : 'Save Changes'}
                       </button>
                     ) : (
-                      <button onClick={() => setStep(2)} disabled={!step1Valid}
+                      <button
+                        onClick={() => { setMobileCheckError(''); handleNextStep() }}
+                        disabled={!step1Valid || mobileChecking}
                         className="w-full flex items-center justify-center gap-2 bg-[#1A5276] text-white text-sm font-semibold py-2.5 rounded-lg hover:bg-[#154360] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                        Next Step <ChevronRight className="w-4 h-4" />
+                        {mobileChecking
+                          ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Checking...</>
+                          : <>Next Step <ChevronRight className="w-4 h-4" /></>}
                       </button>
                     )}
                   </div>
@@ -1070,12 +1142,15 @@ export default function Reception() {
       throw new Error('Your account is not linked to a hospital. Contact your administrator.')
     }
 
-    const fullName    = sanitizeText(formData.name)
-    const mobile      = validateMobile(formData.mobile).stripped
-    const dob         = formData.dob
-    const gender      = sanitizeText(formData.gender)
-    const symptomTags = (formData.symptomTags || []).map(sanitizeText).filter(Boolean)
-    const referral    = sanitizeText(formData.referralSource)
+    const fullName            = sanitizeText(formData.name)
+    const mobile              = validateMobile(formData.mobile).stripped
+    const dob                 = formData.dob
+    const gender              = sanitizeText(formData.gender)
+    const symptomTags         = (formData.symptomTags || []).map(sanitizeText).filter(Boolean)
+    const referral            = sanitizeText(formData.referralSource)
+    const referringDoctorName = referral === 'Doctor Referral'
+      ? sanitizeText(formData.referringDoctorName) || null
+      : null
     // Fix 5: is_emergency comes from both the emergency mini-form AND the appt type
     const isEmergency = !!formData.isEmergency || formData.apptType === 'Emergency'
     const patientType = formData.isReturning ? 'returning' : 'new'
@@ -1100,16 +1175,17 @@ export default function Reception() {
     const { data: newPatient, error: insertError } = await supabase
       .from('patients')
       .insert({
-        hospital_id:     profile.hospital_id,
-        patient_type:    patientType,
-        full_name:       fullName,
-        mobile_number:   mobile,
-        date_of_birth:   dob,
+        hospital_id:           profile.hospital_id,
+        patient_type:          patientType,
+        full_name:             fullName,
+        mobile_number:         mobile,
+        date_of_birth:         dob,
         gender,
-        symptom_tags:    symptomTags,
-        referral_source: referral || null,
-        is_emergency:    isEmergency,
-        registered_by:   profile.id,
+        symptom_tags:          symptomTags,
+        referral_source:       referral || null,
+        referring_doctor_name: referringDoctorName,
+        is_emergency:          isEmergency,
+        registered_by:         profile.id,
       })
       .select()
       .single()
@@ -1142,11 +1218,14 @@ export default function Reception() {
   // Fix 9: replace local state with the fresh Supabase row from .select().single()
   // Fix 7: duplicate mobile check also runs on edits
   const handleUpdatePatient = useCallback(async (updated) => {
-    const fullName    = sanitizeText(updated.name || updated.full_name)
-    const mobile      = validateMobile(updated.mobile || updated.mobile_number || '').stripped
-    const gender      = sanitizeText(updated.gender)
-    const symptomTags = (updated.symptomTags || updated.symptom_tags || []).map(sanitizeText).filter(Boolean)
-    const referral    = sanitizeText(updated.referralSource || updated.referral_source)
+    const fullName            = sanitizeText(updated.name || updated.full_name)
+    const mobile              = validateMobile(updated.mobile || updated.mobile_number || '').stripped
+    const gender              = sanitizeText(updated.gender)
+    const symptomTags         = (updated.symptomTags || updated.symptom_tags || []).map(sanitizeText).filter(Boolean)
+    const referral            = sanitizeText(updated.referralSource || updated.referral_source)
+    const referringDoctorName = referral === 'Doctor Referral'
+      ? sanitizeText(updated.referringDoctorName || updated.referring_doctor_name) || null
+      : null
     const isEmergency = !!updated.isEmergency
     const dob         = updated.dob || updated.date_of_birth
 
@@ -1167,13 +1246,14 @@ export default function Reception() {
     const { data: freshRow, error } = await supabase
       .from('patients')
       .update({
-        full_name:       fullName,
-        mobile_number:   mobile,
-        date_of_birth:   dob,
+        full_name:             fullName,
+        mobile_number:         mobile,
+        date_of_birth:         dob,
         gender,
-        symptom_tags:    symptomTags,
-        referral_source: referral || null,
-        is_emergency:    isEmergency,
+        symptom_tags:          symptomTags,
+        referral_source:       referral || null,
+        referring_doctor_name: referringDoctorName,
+        is_emergency:          isEmergency,
       })
       .eq('id', updated.id)
       .select()

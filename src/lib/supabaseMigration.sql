@@ -425,7 +425,17 @@ CREATE TRIGGER trg_audit_patient_changes
   EXECUTE FUNCTION private.audit_patient_changes();
 
 -- ---------------------------------------------------------------------------
--- 10. MANUAL STEPS - Create your Super Admin account
+-- 10. SCHEMA AMENDMENTS
+-- Safe to re-run: ADD COLUMN IF NOT EXISTS is idempotent.
+-- ---------------------------------------------------------------------------
+
+-- Add referring_doctor_name to patients.
+-- Populated when referral_source = 'Doctor Referral'.
+ALTER TABLE patients
+  ADD COLUMN IF NOT EXISTS referring_doctor_name text;
+
+-- ---------------------------------------------------------------------------
+-- 11. MANUAL STEPS - Create your Super Admin account
 -- ---------------------------------------------------------------------------
 -- After running this SQL:
 -- 1. Go to Supabase Dashboard -> Authentication -> Users -> "Add user"
