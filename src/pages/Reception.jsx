@@ -817,6 +817,13 @@ const EMPTY_FORM = {
 }
 
 function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
+  // useAuth() called here directly — PatientModal is a named function component,
+  // not a closure inside Reception(), so it cannot access Reception()'s profile
+  // variable. handleNextStep needs profile.hospital_id for the duplicate-mobile
+  // Supabase query. All other variables used in this component are either local
+  // state, props, or module-level imports (supabase, validateMobile, etc.).
+  const { profile } = useAuth()
+
   const isEditMode = !!editPatient
 
   const [mode, setMode]   = useState('new')

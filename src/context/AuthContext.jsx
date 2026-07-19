@@ -199,7 +199,10 @@ export function AuthProvider({ children }) {
       return false
     }
 
-    if (staffData.hospital_id && staffData.hospitals?.is_active === false) {
+    // Use !== true (not === false) so that null/undefined — which PostgREST
+    // returns when the hospitals join is blocked by RLS for a deactivated
+    // hospital — is also treated as inactive and correctly rejected.
+    if (staffData.hospital_id && staffData.hospitals?.is_active !== true) {
       await rejectSession('Your hospital account has been deactivated. Contact your administrator.')
       return false
     }
