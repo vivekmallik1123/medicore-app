@@ -119,7 +119,6 @@ export default function App() {
   // EXCEPTION: if signingIn is true, Login.jsx is already showing its own
   // inline spinner — do NOT replace it with LoadingScreen, which would
   // unmount the login page and cause a visible navigation flash.
-  const { signingIn } = useAuth()
   if (!authReady && !signingIn) return <LoadingScreen />
 
   // Stage 3: fully authorized → render the app
