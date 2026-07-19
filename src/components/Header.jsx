@@ -1,6 +1,16 @@
+/**
+ * Header.jsx
+ * ----------
+ * Top navigation bar. Now shows:
+ * - Logged-in staff member's name (from AuthContext profile)
+ * - A Logout button that calls supabase.auth.signOut via AuthContext
+ * - Notification bell (unchanged)
+ */
+
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, X } from 'lucide-react'
+import { Bell, X, LogOut } from 'lucide-react'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const NOTIFICATIONS = [
   { id: 1, dot: '#C0392B', text: 'ICU Bed 1 — Arjun Singh vitals critical', time: '2 mins ago', badge: 'IPD', badgeColor: '#C0392B', unread: true, critical: true },
@@ -28,7 +38,6 @@ function NotificationPanel({ onClose, onNavigateAll }) {
       className="fixed right-0 top-0 h-screen bg-white shadow-2xl z-50 flex flex-col"
       style={{ width: '380px' }}
     >
-      {/* Header row */}
       <div className="sticky top-0 bg-white border-b border-[#E5E7EB] px-4 py-3 flex items-center justify-between z-10">
         <p className="font-bold text-[#2C3E50]" style={{ fontSize: '18px' }}>Notifications</p>
         <div className="flex items-center gap-3">
@@ -39,7 +48,6 @@ function NotificationPanel({ onClose, onNavigateAll }) {
         </div>
       </div>
 
-      {/* Filter tabs */}
       <div className="flex border-b border-[#E5E7EB] px-4">
         {['All', 'Unread', 'Critical'].map((tab) => (
           <button
@@ -56,7 +64,6 @@ function NotificationPanel({ onClose, onNavigateAll }) {
         ))}
       </div>
 
-      {/* Notification list */}
       <div className="flex-1 overflow-y-auto flex flex-col">
         {filtered.map((n) => (
           <div
@@ -68,16 +75,9 @@ function NotificationPanel({ onClose, onNavigateAll }) {
               backgroundColor: n.unread ? '#EBF5FB' : '#FFFFFF',
             }}
           >
-            <span
-              className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
-              style={{ backgroundColor: n.dot }}
-            />
+            <span className="w-2 h-2 rounded-full flex-shrink-0 mt-1.5" style={{ backgroundColor: n.dot }} />
             <div className="flex-1 min-w-0">
-              <p
-                className={`text-sm text-gray-900 ${n.unread ? 'font-bold' : 'font-normal'}`}
-              >
-                {n.text}
-              </p>
+              <p className={`text-sm text-gray-900 ${n.unread ? 'font-bold' : 'font-normal'}`}>{n.text}</p>
             </div>
             <div className="flex flex-col items-end gap-1 flex-shrink-0">
               <span className="text-[11px] text-gray-400">{n.time}</span>
@@ -95,7 +95,6 @@ function NotificationPanel({ onClose, onNavigateAll }) {
         )}
       </div>
 
-      {/* Footer */}
       <div className="sticky bottom-0 border-t border-[#E5E7EB]">
         <button
           onClick={onNavigateAll}
@@ -110,14 +109,24 @@ function NotificationPanel({ onClose, onNavigateAll }) {
 }
 
 export default function Header() {
+  // Get the logged-in user's profile and the signOut function from AuthContext
+  const { profile, signOut } = useAuth()
   const [showNotifications, setShowNotifications] = useState(false)
   const navigate = useNavigate()
+
   const today = new Date().toLocaleDateString('en-IN', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
+    weekday: 'long', day: '2-digit', month: 'short', year: 'numeric',
   })
+
+  // Derive initials from the staff member's full name for the avatar
+  const initials = profile?.full_name
+    ? profile.full_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+    : 'U'
+
+  const handleLogout = async () => {
+    await signOut()
+    // AuthContext clears user state → App.jsx redirects to /login automatically
+  }
 
   return (
     <>
@@ -133,7 +142,7 @@ export default function Header() {
           <p className="text-xs text-gray-500 mt-0.5">{today}</p>
         </div>
 
-        {/* Right: Status + Bell + Avatar */}
+        {/* Right: Status + Bell + User info + Logout */}
         <div className="flex items-center gap-4">
           {/* System Online */}
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 px-2.5 py-1 rounded-full">
@@ -155,17 +164,34 @@ export default function Header() {
             </span>
           </button>
 
-          {/* Avatar */}
+          {/* Logged-in user name + role */}
+          {profile && (
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-xs font-semibold text-gray-800 leading-none">{profile.full_name}</span>
+              <span className="text-[10px] text-gray-400 mt-0.5 capitalize">{profile.role?.replace(/_/g, ' ')}</span>
+            </div>
+          )}
+
+          {/* Avatar — navigates to profile page */}
           <div
             onClick={() => navigate('/profile')}
             className="w-8 h-8 rounded-full bg-[#1A5276] text-white flex items-center justify-center text-sm font-bold select-none cursor-pointer hover:opacity-80 transition-opacity"
           >
-            A
+            {initials}
           </div>
+
+          {/* Logout button */}
+          <button
+            onClick={handleLogout}
+            title="Logout"
+            className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors border border-gray-200 hover:border-red-200"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Logout
+          </button>
         </div>
       </header>
 
-      {/* Notification slide-in panel */}
       {showNotifications && (
         <>
           <div
