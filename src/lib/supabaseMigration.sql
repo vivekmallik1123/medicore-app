@@ -213,9 +213,19 @@ CREATE POLICY "staff_select_own_profile"
     AND private.get_my_is_active() = true
   );
 
--- Fix 1: Staff can UPDATE only their own row, and only safe self-service
--- fields (full_name). Authorization fields (role, hospital_id, is_active,
+-- Fix 1: Staff can UPDATE only their own row, and only the safe self-service
+-- column (full_name). Authorization fields (role, hospital_id, is_active,
 -- module_permissions) must be changed via the update_staff_authorization RPC.
+--
+-- IMPORTANT: RLS WITH CHECK controls which ROWS can be updated, not which
+-- COLUMNS. Without column-level privileges, a crafted UPDATE payload could
+-- still set role/hospital_id/is_active/module_permissions directly.
+-- We therefore revoke table-level UPDATE from 'authenticated' and grant
+-- UPDATE only on the safe column. The update_staff_authorization RPC runs
+-- as SECURITY DEFINER and is unaffected by this revoke.
+REVOKE UPDATE ON staff_profiles FROM authenticated;
+GRANT  UPDATE (full_name) ON staff_profiles TO authenticated;
+
 CREATE POLICY "staff_update_own_safe_fields"
   ON staff_profiles FOR UPDATE
   USING (
