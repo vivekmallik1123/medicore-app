@@ -136,11 +136,23 @@ AS $$
   SELECT is_active FROM public.hospitals WHERE id = p_hospital_id;
 $$;
 
--- Revoke EXECUTE from public and anon on all private functions
-REVOKE EXECUTE ON FUNCTION private.get_my_hospital_id()              FROM PUBLIC, anon;
-REVOKE EXECUTE ON FUNCTION private.get_my_role()                     FROM PUBLIC, anon;
-REVOKE EXECUTE ON FUNCTION private.get_my_is_active()               FROM PUBLIC, anon;
-REVOKE EXECUTE ON FUNCTION private.get_hospital_is_active(uuid)     FROM PUBLIC, anon;
+-- Revoke EXECUTE from PUBLIC and anon — these functions must NOT be
+-- callable via the PostgREST API or by unauthenticated clients.
+REVOKE EXECUTE ON FUNCTION private.get_my_hospital_id()          FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION private.get_my_role()                 FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION private.get_my_is_active()            FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION private.get_hospital_is_active(uuid)  FROM PUBLIC, anon;
+
+-- Grant EXECUTE to authenticated only.
+-- These functions are called during RLS policy evaluation for logged-in
+-- users, who connect as the 'authenticated' role. Without this GRANT,
+-- every authenticated query that hits an RLS policy using these helpers
+-- fails with "permission denied for function" (403).
+-- anon and PUBLIC remain revoked above.
+GRANT EXECUTE ON FUNCTION private.get_my_hospital_id()          TO authenticated;
+GRANT EXECUTE ON FUNCTION private.get_my_role()                 TO authenticated;
+GRANT EXECUTE ON FUNCTION private.get_my_is_active()            TO authenticated;
+GRANT EXECUTE ON FUNCTION private.get_hospital_is_active(uuid)  TO authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. RLS POLICIES - hospitals

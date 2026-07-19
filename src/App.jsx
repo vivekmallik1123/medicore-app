@@ -99,7 +99,7 @@ function AppLayout() {
 
 export default function App() {
   // authReady is the critical gate — false until all checks pass.
-  const { user, authReady, loading } = useAuth()
+  const { user, authReady, signingIn, loading } = useAuth()
 
   // Stage 1: initial session restore in progress
   if (loading) return <LoadingScreen />
@@ -116,8 +116,11 @@ export default function App() {
 
   // Stage 2b: session exists but is_active checks not yet complete
   // (the window between setUser() and fetchProfile() resolving).
-  // Show LoadingScreen — never AppLayout.
-  if (!authReady) return <LoadingScreen />
+  // EXCEPTION: if signingIn is true, Login.jsx is already showing its own
+  // inline spinner — do NOT replace it with LoadingScreen, which would
+  // unmount the login page and cause a visible navigation flash.
+  const { signingIn } = useAuth()
+  if (!authReady && !signingIn) return <LoadingScreen />
 
   // Stage 3: fully authorized → render the app
   return <AppLayout />

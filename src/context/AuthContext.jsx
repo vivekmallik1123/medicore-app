@@ -35,6 +35,10 @@ export function AuthProvider({ children }) {
   // authReady: true only after session + both is_active checks pass.
   // App.jsx must NOT render AppLayout until this is true.
   const [authReady,          setAuthReady]          = useState(false)
+  // signingIn: true from the moment signIn() is called until fetchProfile
+  // resolves (success or failure). Login.jsx uses this to keep its own
+  // loading state visible so App.jsx never swaps to LoadingScreen mid-flow.
+  const [signingIn,          setSigningIn]          = useState(false)
   // deactivatedMessage: shown on the login page after a force sign-out.
   const [deactivatedMessage, setDeactivatedMessage] = useState('')
 
@@ -171,6 +175,9 @@ export function AuthProvider({ children }) {
         setUser(authUser)
         const ok = await fetchProfile(authUser)
         if (ok) setDeactivatedMessage('')
+        // Clear signingIn now that the full flow (credential check +
+        // fetchProfile) has completed. Login.jsx's spinner can stop.
+        setSigningIn(false)
         setLoading(false)
       }
     )
@@ -178,16 +185,26 @@ export function AuthProvider({ children }) {
   }, [fetchProfile])
 
   // ── Sign in ──────────────────────────────────────────────────────────────────
-  // Delegates credential check to Supabase. The is_active checks run
-  // automatically via onAuthStateChange → fetchProfile after a successful
-  // login, so signIn() itself stays simple.
+  // Sets signingIn=true before calling Supabase so Login.jsx can keep its
+  // own spinner visible throughout the entire flow (credential check +
+  // fetchProfile). This prevents App.jsx from briefly rendering LoadingScreen
+  // between setUser() and authReady becoming true, which would cause the
+  // login page to unmount and remount (the visible "navigation" bug).
+  // signingIn is cleared inside onAuthStateChange once fetchProfile resolves.
   const signIn = useCallback(async (email, password) => {
     setDeactivatedMessage('')
+    setSigningIn(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      // Credential check failed — no onAuthStateChange will fire, so we
+      // must clear signingIn here.
+      setSigningIn(false)
+    }
+    // On success, signingIn is cleared in onAuthStateChange after fetchProfile.
     return { error }
   }, [])
 
-  const value = { user, profile, loading, authReady, deactivatedMessage, signIn, signOut }
+  const value = { user, profile, loading, authReady, signingIn, deactivatedMessage, signIn, signOut }
 
   return (
     <AuthContext.Provider value={value}>
