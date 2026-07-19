@@ -444,8 +444,148 @@ CREATE TRIGGER trg_audit_patient_changes
 ALTER TABLE patients
   ADD COLUMN IF NOT EXISTS referring_doctor_name text;
 
+-- Add specialty to staff_profiles.
+-- Used for doctor staff members to indicate their department/specialty.
+ALTER TABLE staff_profiles
+  ADD COLUMN IF NOT EXISTS specialty text;
+
 -- ---------------------------------------------------------------------------
--- 11. MANUAL STEPS - Create your Super Admin account
+-- 11. VISITS TABLE (Phase 2 — OPD Doctor module)
+-- One row per patient visit/appointment. Created by Reception when a
+-- patient is registered; updated by the doctor during consultation.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS visits (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  hospital_id          uuid NOT NULL REFERENCES hospitals(id) ON DELETE RESTRICT,
+  patient_id           uuid NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+  doctor_id            uuid REFERENCES staff_profiles(id) ON DELETE SET NULL,
+  department           text,
+  appointment_type     text CHECK (appointment_type IN ('OPD Consultation','Follow-up','Emergency')),
+  time_slot            text,
+  token                text,
+  status               text NOT NULL DEFAULT 'Waiting'
+                         CHECK (status IN ('Waiting','InConsultation','Done','OnHold','SentToOPD')),
+  vitals               jsonb,
+  presenting_complaint text,
+  diagnosis            text,
+  notes                text,
+  prescriptions        jsonb,
+  lab_tests_ordered    jsonb,
+  registered_by        uuid REFERENCES staff_profiles(id) ON DELETE SET NULL,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  completed_at         timestamptz
+);
+
+ALTER TABLE visits ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------------
+-- 12. RLS POLICIES - visits
+-- Same pattern as patients: super_admin full access; staff limited to
+-- own hospital with both is_active checks.
+-- ---------------------------------------------------------------------------
+
+DROP POLICY IF EXISTS "super_admin_visits_all"           ON visits;
+DROP POLICY IF EXISTS "staff_visits_own_hospital_select" ON visits;
+DROP POLICY IF EXISTS "staff_visits_own_hospital_insert" ON visits;
+DROP POLICY IF EXISTS "staff_visits_own_hospital_update" ON visits;
+
+CREATE POLICY "super_admin_visits_all"
+  ON visits FOR ALL
+  USING  (private.get_my_role() = 'super_admin')
+  WITH CHECK (private.get_my_role() = 'super_admin');
+
+CREATE POLICY "staff_visits_own_hospital_select"
+  ON visits FOR SELECT
+  USING (
+    private.get_my_role() != 'super_admin'
+    AND hospital_id = private.get_my_hospital_id()
+    AND private.get_my_is_active() = true
+    AND private.get_hospital_is_active(hospital_id) = true
+  );
+
+CREATE POLICY "staff_visits_own_hospital_insert"
+  ON visits FOR INSERT
+  WITH CHECK (
+    private.get_my_role() != 'super_admin'
+    AND hospital_id = private.get_my_hospital_id()
+    AND private.get_my_is_active() = true
+    AND private.get_hospital_is_active(hospital_id) = true
+  );
+
+CREATE POLICY "staff_visits_own_hospital_update"
+  ON visits FOR UPDATE
+  USING (
+    private.get_my_role() != 'super_admin'
+    AND hospital_id = private.get_my_hospital_id()
+    AND private.get_my_is_active() = true
+    AND private.get_hospital_is_active(hospital_id) = true
+  )
+  WITH CHECK (
+    private.get_my_role() != 'super_admin'
+    AND hospital_id = private.get_my_hospital_id()
+    AND private.get_my_is_active() = true
+    AND private.get_hospital_is_active(hospital_id) = true
+  );
+
+-- ---------------------------------------------------------------------------
+-- 13. AUDIT TRIGGER - visits (same pattern as patients trigger)
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION private.audit_visit_changes()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO public.audit_logs (
+      hospital_id, staff_id, action, target_table, target_id, details
+    ) VALUES (
+      NEW.hospital_id,
+      NEW.registered_by,
+      'created_visit',
+      'visits',
+      NEW.id,
+      jsonb_build_object(
+        'patient_id',       NEW.patient_id,
+        'doctor_id',        NEW.doctor_id,
+        'department',       NEW.department,
+        'appointment_type', NEW.appointment_type,
+        'token',            NEW.token
+      )
+    );
+  ELSIF TG_OP = 'UPDATE' THEN
+    INSERT INTO public.audit_logs (
+      hospital_id, staff_id, action, target_table, target_id, details
+    ) VALUES (
+      NEW.hospital_id,
+      auth.uid(),
+      'updated_visit',
+      'visits',
+      NEW.id,
+      jsonb_build_object(
+        'patient_id', NEW.patient_id,
+        'status',     NEW.status,
+        'diagnosis',  NEW.diagnosis
+      )
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION private.audit_visit_changes() FROM PUBLIC, anon;
+
+DROP TRIGGER IF EXISTS trg_audit_visit_changes ON visits;
+CREATE TRIGGER trg_audit_visit_changes
+  AFTER INSERT OR UPDATE ON visits
+  FOR EACH ROW
+  EXECUTE FUNCTION private.audit_visit_changes();
+
+-- ---------------------------------------------------------------------------
+-- 14. MANUAL STEPS - Create your Super Admin account
 -- ---------------------------------------------------------------------------
 -- After running this SQL:
 -- 1. Go to Supabase Dashboard -> Authentication -> Users -> "Add user"

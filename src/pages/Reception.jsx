@@ -14,6 +14,15 @@
  *   it atomically as part of the same transaction.
  * - Fix 9: After update, local state is replaced with the fresh Supabase
  *   row (from .select().single()) instead of a manual merge.
+ *
+ * Phase 2 changes:
+ * - Step 2 doctor picker now reads real staff_profiles (role='doctor')
+ *   for the current hospital instead of the mock DOCTORS array.
+ * - After a successful patient INSERT, a visits row is created with the
+ *   Step 2 data (department, doctor_id, appointment_type, time_slot, token).
+ *   KNOWN LIMITATION: the two INSERTs are sequential, not atomic. If the
+ *   visit INSERT fails after the patient INSERT succeeds, the patient exists
+ *   without a linked visit. The error is surfaced clearly to the user.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -23,7 +32,7 @@ import {
   AlertTriangle, Search, ChevronDown, ChevronUp, AlertCircle,
 } from 'lucide-react'
 import {
-  DOCTORS, SYMPTOM_TAGS, REFERRAL_SOURCES, DEPARTMENTS,
+  SYMPTOM_TAGS, REFERRAL_SOURCES, DEPARTMENTS,
 } from '../data/mockData.js'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -685,9 +694,10 @@ function Step1Form({ form, setForm, isReturning, editMode }) {
 
 // --- Step 2: Appointment Details ---------------------------------------------
 
-function Step2Form({ form, setForm, isReturning }) {
+function Step2Form({ form, setForm, isReturning, doctors }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
-  const deptDoctors = DOCTORS.filter((d) => !form.department || d.specialty === form.department)
+  // doctors is the real staff_profiles list passed down from PatientModal
+  const deptDoctors = doctors.filter((d) => !form.department || d.specialty === form.department)
 
   const apptTypes = [
     { key: 'OPD',       title: 'OPD Consultation', desc: 'Regular outpatient visit',                                   border: 'border-[#1A5276]', bg: 'bg-[#EBF5FB]', show: true },
@@ -739,7 +749,7 @@ function Step2Form({ form, setForm, isReturning }) {
           {DEPARTMENTS.map((dept) => {
             const meta = DEPT_META[dept.name] || { icon: '\ud83c\udfe5', color: '' }
             const sel  = form.department === dept.name
-            const docCount = DOCTORS.filter((d) => d.specialty === dept.name).length
+            const docCount = doctors.filter((d) => d.specialty === dept.name).length
             return (
               <button key={dept.name} type="button"
                 onClick={() => { set('department', dept.name); set('doctor', '') }}
@@ -758,26 +768,23 @@ function Step2Form({ form, setForm, isReturning }) {
       <div>
         <label className="block text-xs font-semibold text-gray-700 mb-1.5">Assign Doctor</label>
         <div className="space-y-2">
-          {deptDoctors.length === 0 && <p className="text-xs text-gray-400">Select a department first</p>}
+          {deptDoctors.length === 0 && (
+            <p className="text-xs text-gray-400">
+              {form.department ? 'No doctors found for this department' : 'Select a department first'}
+            </p>
+          )}
           {deptDoctors.map((d) => {
-            const sel = form.doctor === d.name
+            // form.doctor stores the doctor's staff_profiles UUID
+            const sel = form.doctor === d.id
             return (
-              <button key={d.id} type="button" onClick={() => set('doctor', d.name)}
+              <button key={d.id} type="button" onClick={() => set('doctor', d.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all ${
                   sel ? 'border-[#1A5276] bg-[#EBF5FB]' : 'border-[#E5E7EB] hover:bg-[#F8F9FA]'
                 }`}>
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${DOCTOR_STATUS_DOT[d.status] || 'bg-gray-400'}`} />
                 <div className="flex-1 text-left">
-                  <p className={`text-sm font-semibold ${sel ? 'text-[#1A5276]' : 'text-gray-800'}`}>{d.name}</p>
-                  <p className="text-[10px] text-gray-400">{d.specialty} - Queue: {d.patients}</p>
+                  <p className={`text-sm font-semibold ${sel ? 'text-[#1A5276]' : 'text-gray-800'}`}>{d.full_name}</p>
+                  <p className="text-[10px] text-gray-400">{d.specialty || 'General'}</p>
                 </div>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                  d.status === 'Available' ? 'bg-green-100 text-green-700'
-                  : d.status === 'InConsult' ? 'bg-blue-100 text-blue-700'
-                  : 'bg-orange-100 text-orange-700'
-                }`}>
-                  {d.status === 'InConsult' ? 'In Consult' : d.status === 'OnBreak' ? 'On Break' : 'Available'}
-                </span>
                 {sel && <CheckCircle2 className="w-4 h-4 text-[#1A5276] flex-shrink-0" />}
               </button>
             )
@@ -816,7 +823,7 @@ const EMPTY_FORM = {
   isEmergency: false,
 }
 
-function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
+function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients, doctors }) {
   // useAuth() called here directly — PatientModal is a named function component,
   // not a closure inside Reception(), so it cannot access Reception()'s profile
   // variable. handleNextStep needs profile.hospital_id for the duplicate-mobile
@@ -1042,7 +1049,7 @@ function PatientModal({ onClose, onAdd, onUpdate, editPatient, allPatients }) {
               {step === 2 && (
                 <>
                   <p className="text-sm font-bold text-gray-800 mb-4">Appointment Details</p>
-                  <Step2Form form={form} setForm={setForm} isReturning={isReturning} />
+                  <Step2Form form={form} setForm={setForm} isReturning={isReturning} doctors={doctors} />
                   <div className="flex gap-3 mt-5">
                     <button onClick={() => setStep(1)}
                       className="flex-1 border border-[#E5E7EB] text-gray-600 text-sm font-medium py-2.5 rounded-lg hover:bg-[#F8F9FA] transition-colors">
@@ -1115,6 +1122,8 @@ export default function Reception() {
   const [editPatient, setEditPatient] = useState(null)
   const [loadError, setLoadError]     = useState('')
   const [loading, setLoading]         = useState(true)
+  // Real doctors from staff_profiles (role='doctor', same hospital)
+  const [doctors, setDoctors]         = useState([])
 
   // Load patients - RLS auto-filters to this hospital
   // Fix 5: order by is_emergency DESC so emergency patients always load first
@@ -1140,6 +1149,18 @@ export default function Reception() {
   }, [])
 
   useEffect(() => { loadPatients() }, [loadPatients])
+
+  // Load real doctors for this hospital (role='doctor')
+  useEffect(() => {
+    if (!profile?.hospital_id) return
+    supabase
+      .from('staff_profiles')
+      .select('id, full_name, specialty')
+      .eq('hospital_id', profile.hospital_id)
+      .eq('role', 'doctor')
+      .eq('is_active', true)
+      .then(({ data }) => setDoctors(data || []))
+  }, [profile?.hospital_id])
 
   // -- Add new patient --------------------------------------------------------
   // Fix 8: manual audit_logs INSERT removed - the Postgres trigger handles it.
@@ -1209,6 +1230,36 @@ export default function Reception() {
     }
 
     // Fix 8: audit log is written by the Postgres trigger - no manual insert needed.
+
+    // Phase 2: create a linked visits row with the Step 2 appointment data.
+    // KNOWN LIMITATION: sequential INSERT, not atomic with the patient INSERT.
+    // If this fails, the patient exists without a linked visit.
+    const apptTypeMap = {
+      'OPD':       'OPD Consultation',
+      'Follow-up': 'Follow-up',
+      'Emergency': 'Emergency',
+    }
+    const { error: visitError } = await supabase
+      .from('visits')
+      .insert({
+        hospital_id:      profile.hospital_id,
+        patient_id:       newPatient.id,
+        doctor_id:        formData.doctor || null,
+        department:       sanitizeText(formData.department) || null,
+        appointment_type: apptTypeMap[formData.apptType] || 'OPD Consultation',
+        time_slot:        formData.timeSlot || null,
+        token:            formData.token || null,
+        status:           'Waiting',
+        registered_by:    profile.id,
+      })
+
+    if (visitError) {
+      // Patient was saved — surface the visit failure clearly.
+      throw new Error(
+        `Patient registered (ID: ${newPatient.id}) but the visit record could not be created: ` +
+        `${visitError.message}. Please contact your administrator.`
+      )
+    }
 
     const patientWithToken = {
       ...newPatient,
@@ -1341,6 +1392,7 @@ export default function Reception() {
           onUpdate={handleUpdatePatient}
           editPatient={editPatient}
           allPatients={patients}
+          doctors={doctors}
         />
       )}
     </>
