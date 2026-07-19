@@ -3,14 +3,21 @@
  * ---------------
  * Provides app-wide authentication state using Supabase Auth.
  *
- * Security fixes applied:
- * - Fix 2: After fetching staff_profiles, checks is_active on both the
- *   staff row and the linked hospital. Signs out with a clear message
- *   if either is deactivated.
- * - Fix 4: Uses BroadcastChannel to share the last-activity timestamp
- *   across all open tabs. Activity in ANY tab resets the inactivity
- *   timer for ALL tabs, preventing a background tab from signing the
- *   user out while they are actively working in another tab.
+ * Security model:
+ * - `loading`   — true while Supabase is restoring the session on page load.
+ * - `authReady` — true ONLY after ALL three checks have passed:
+ *                   1. A valid Supabase session exists
+ *                   2. staff_profiles.is_active === true
+ *                   3. hospitals.is_active === true  (if staff has a hospital)
+ *                 App.jsx gates AppLayout on this flag. The dashboard is
+ *                 never rendered until authReady is true.
+ * - `deactivatedMessage` — set when a session is force-ended due to an
+ *                 inactive staff or hospital account. Login.jsx reads this
+ *                 to display the correct message to the user.
+ *
+ * Other features:
+ * - Fix 4: BroadcastChannel cross-tab inactivity timer — activity in any
+ *   tab resets the 30-minute timer for all tabs.
  */
 
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
@@ -18,23 +25,23 @@ import { supabase } from '../lib/supabaseClient'
 
 const AuthContext = createContext(null)
 
-// 30 minutes in milliseconds
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000
-
-// BroadcastChannel name - all tabs on the same origin share this channel
 const ACTIVITY_CHANNEL_NAME = 'medicore_activity'
 
 export function AuthProvider({ children }) {
-  const [user, setUser]             = useState(null)
-  const [profile, setProfile]       = useState(null)
-  const [loading, setLoading]       = useState(true)
-  // deactivatedMessage is shown on the login page when a session is force-ended
+  const [user,               setUser]               = useState(null)
+  const [profile,            setProfile]            = useState(null)
+  const [loading,            setLoading]            = useState(true)
+  // authReady: true only after session + both is_active checks pass.
+  // App.jsx must NOT render AppLayout until this is true.
+  const [authReady,          setAuthReady]          = useState(false)
+  // deactivatedMessage: shown on the login page after a force sign-out.
   const [deactivatedMessage, setDeactivatedMessage] = useState('')
 
   const inactivityTimer  = useRef(null)
   const broadcastChannel = useRef(null)
 
-  // -- Sign out ---------------------------------------------------------------
+  // ── Sign out ────────────────────────────────────────────────────────────────
   const signOut = useCallback(async (message = '') => {
     clearTimeout(inactivityTimer.current)
     if (broadcastChannel.current) {
@@ -44,20 +51,17 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
+    setAuthReady(false)
     if (message) setDeactivatedMessage(message)
   }, [])
 
-  // -- Inactivity timer (Fix 4: cross-tab via BroadcastChannel) ---------------
-  // When the user is active in this tab, we broadcast a timestamp to all
-  // other tabs. Each tab resets its own local timer when it receives the
-  // broadcast, so activity in any tab keeps all tabs alive.
+  // ── Inactivity timer (cross-tab via BroadcastChannel) ───────────────────────
   const resetInactivityTimer = useCallback(() => {
     clearTimeout(inactivityTimer.current)
     inactivityTimer.current = setTimeout(() => {
       signOut('You were signed out due to 30 minutes of inactivity.')
     }, INACTIVITY_TIMEOUT_MS)
 
-    // Broadcast activity to other tabs
     if (broadcastChannel.current) {
       try {
         broadcastChannel.current.postMessage({ type: 'activity', ts: Date.now() })
@@ -78,11 +82,9 @@ export function AuthProvider({ children }) {
       return
     }
 
-    // Open the shared channel for this tab
     const channel = new BroadcastChannel(ACTIVITY_CHANNEL_NAME)
     broadcastChannel.current = channel
 
-    // When another tab broadcasts activity, reset this tab's timer too
     channel.onmessage = (event) => {
       if (event.data?.type === 'activity') {
         clearTimeout(inactivityTimer.current)
@@ -94,7 +96,7 @@ export function AuthProvider({ children }) {
 
     const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']
     events.forEach((e) => window.addEventListener(e, resetInactivityTimer))
-    resetInactivityTimer() // start the timer immediately on login
+    resetInactivityTimer()
 
     return () => {
       events.forEach((e) => window.removeEventListener(e, resetInactivityTimer))
@@ -104,14 +106,14 @@ export function AuthProvider({ children }) {
     }
   }, [user, resetInactivityTimer, signOut])
 
-  // -- Fetch and validate staff profile (Fix 2) --------------------------------
-  // After every login or session restore:
-  // 1. Fetch the staff_profiles row (with joined hospital is_active)
-  // 2. Check staff is_active - sign out if false
-  // 3. If staff has a hospital_id, check hospital is_active - sign out if false
+  // ── Fetch and validate staff profile ────────────────────────────────────────
+  // Called after every login or session restore.
+  // Sets authReady to true only if all checks pass.
+  // Returns true if authorized, false if the session was terminated.
   const fetchProfile = useCallback(async (authUser) => {
     if (!authUser) {
       setProfile(null)
+      setAuthReady(false)
       return false
     }
 
@@ -127,29 +129,45 @@ export function AuthProvider({ children }) {
       return false
     }
 
-    // Fix 2: Check staff account is active
+    // Check staff account is active
     if (!staffData.is_active) {
       await signOut('Your account has been deactivated. Contact your administrator.')
       return false
     }
 
-    // Fix 2: Check the linked hospital is active (Super Admin has no hospital)
+    // Check the linked hospital is active (Super Admin has no hospital_id)
     if (staffData.hospital_id && staffData.hospitals?.is_active === false) {
       await signOut('Your hospital account has been deactivated. Contact your administrator.')
       return false
     }
 
-    // Strip the joined hospitals object before storing in context
+    // All checks passed — strip the joined hospitals object before storing
     const { hospitals: _h, ...cleanProfile } = staffData
     setProfile(cleanProfile)
+    setAuthReady(true)
     return true
   }, [signOut])
 
-  // -- Auth state listener ----------------------------------------------------
+  // ── Auth state listener ──────────────────────────────────────────────────────
+  // Fires on page load (session restore), login, and logout.
+  // authReady is only set to true inside fetchProfile when all checks pass,
+  // so the dashboard is never rendered prematurely.
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         const authUser = session?.user ?? null
+
+        if (!authUser) {
+          // Logged out — clear everything
+          setUser(null)
+          setProfile(null)
+          setAuthReady(false)
+          setLoading(false)
+          return
+        }
+
+        // Set user so inactivity listeners can attach, but do NOT set
+        // authReady yet — that only happens after fetchProfile passes.
         setUser(authUser)
         const ok = await fetchProfile(authUser)
         if (ok) setDeactivatedMessage('')
@@ -159,14 +177,17 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [fetchProfile])
 
-  // -- Sign in ----------------------------------------------------------------
+  // ── Sign in ──────────────────────────────────────────────────────────────────
+  // Delegates credential check to Supabase. The is_active checks run
+  // automatically via onAuthStateChange → fetchProfile after a successful
+  // login, so signIn() itself stays simple.
   const signIn = useCallback(async (email, password) => {
     setDeactivatedMessage('')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return { error }
   }, [])
 
-  const value = { user, profile, loading, deactivatedMessage, signIn, signOut }
+  const value = { user, profile, loading, authReady, deactivatedMessage, signIn, signOut }
 
   return (
     <AuthContext.Provider value={value}>

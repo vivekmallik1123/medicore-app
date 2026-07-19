@@ -3,11 +3,25 @@
  * -------
  * Root layout and route definitions.
  *
- * Route protection:
- * - While the auth session is being checked on load, a full-screen
- *   loading spinner is shown (prevents flash of unauthenticated content)
- * - If no active session exists, the user is redirected to /login
- * - All app routes are only reachable when authenticated
+ * Route protection — three-stage gate:
+ *
+ * Stage 1 — loading is true:
+ *   Supabase is restoring the session from localStorage.
+ *   Show LoadingScreen. Nothing else renders.
+ *
+ * Stage 2 — loading is false, authReady is false:
+ *   Either no session exists, OR a session exists but the
+ *   is_active checks (staff + hospital) have not yet passed.
+ *   Show login routes if there is no user, or LoadingScreen
+ *   while the check is still in progress.
+ *   AppLayout is NEVER rendered at this stage.
+ *
+ * Stage 3 — loading is false, authReady is true:
+ *   Valid session + staff is_active + hospital is_active all
+ *   confirmed. Only now is AppLayout rendered.
+ *
+ * This guarantees the dashboard is never visible, even for a
+ * single frame, before authorization is fully confirmed.
  */
 
 import { Routes, Route, Navigate } from 'react-router-dom'
@@ -30,7 +44,9 @@ import HR           from './pages/HR.jsx'
 import Profile      from './pages/Profile.jsx'
 import Notifications from './pages/Notifications.jsx'
 
-// ── Loading screen shown while Supabase checks the existing session ──────────
+// ── Loading screen ────────────────────────────────────────────────────────────
+// Shown while Supabase restores the session OR while the is_active
+// authorization check is in progress. The dashboard never renders here.
 function LoadingScreen() {
   return (
     <div
@@ -48,7 +64,8 @@ function LoadingScreen() {
   )
 }
 
-// ── Protected layout — only rendered when user is authenticated ───────────────
+// ── Protected layout ──────────────────────────────────────────────────────────
+// Only rendered when authReady is true (all checks passed).
 function AppLayout() {
   return (
     <div
@@ -72,7 +89,6 @@ function AppLayout() {
             <Route path="/hr"             element={<HR />}           />
             <Route path="/profile"        element={<Profile />}      />
             <Route path="/notifications"  element={<Notifications />}/>
-            {/* Catch-all: redirect unknown paths to dashboard */}
             <Route path="*"               element={<Navigate to="/" replace />} />
           </Routes>
         </main>
@@ -82,22 +98,27 @@ function AppLayout() {
 }
 
 export default function App() {
-  const { user, loading } = useAuth()
+  // authReady is the critical gate — false until all checks pass.
+  const { user, authReady, loading } = useAuth()
 
-  // Show spinner while Supabase restores the session from localStorage
+  // Stage 1: initial session restore in progress
   if (loading) return <LoadingScreen />
 
-  // Not logged in → show login page
+  // Stage 2a: no session at all → show login
   if (!user) {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />
-        {/* Redirect any other path to /login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     )
   }
 
-  // Logged in → show the full app
+  // Stage 2b: session exists but is_active checks not yet complete
+  // (the window between setUser() and fetchProfile() resolving).
+  // Show LoadingScreen — never AppLayout.
+  if (!authReady) return <LoadingScreen />
+
+  // Stage 3: fully authorized → render the app
   return <AppLayout />
 }
