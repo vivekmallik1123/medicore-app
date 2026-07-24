@@ -1,96 +1,31 @@
-import { useState, useRef } from 'react'
+/**
+ * OPDDoctor.jsx
+ * -------------
+ * OPD Doctor module — Phase 2: connected to real Supabase data.
+ *
+ * - Queue reads from visits JOIN patients for the logged-in doctor.
+ * - Consultation form saves vitals, complaint, diagnosis, prescriptions,
+ *   lab tests, and notes to the visits row on "Save & Mark Done".
+ * - Mock PATIENTS and DOCTORS arrays are no longer used in this file.
+ */
+
+import { useState, useEffect, useCallback } from 'react'
 import {
   ChevronDown, ChevronUp, Plus, Trash2, FlaskConical,
   CheckCircle2, MessageCircle, Save, X, Printer,
-  Coffee, Play, ArrowRight, Bell, BedDouble,
+  Coffee, Play, ArrowRight, Bell, BedDouble, AlertCircle,
 } from 'lucide-react'
-import { PATIENTS, DOCTORS } from '../data/mockData.js'
-
-// ─── Part 3: IPD Recommendation Button ───────────────────────────────────────────────────────────────
-
-function IPDRecommendButton({ patient }) {
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [sent,        setSent]        = useState(false)
-  const [toast,       setToast]       = useState(false)
-
-  const handleConfirm = () => {
-    setSent(true)
-    setShowConfirm(false)
-    setToast(true)
-    setTimeout(() => setToast(false), 3500)
-  }
-
-  if (sent) {
-    return (
-      <div className="mx-5 mb-3">
-        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
-          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-          <p className="text-xs font-semibold text-green-800">IPD admission request sent to reception</p>
-        </div>
-        {toast && (
-          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#1A5276] text-white text-sm font-semibold px-5 py-3.5 rounded-xl shadow-2xl">
-            <BedDouble className="w-4 h-4" />
-            IPD admission request sent to reception
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="mx-5 mb-3">
-      {!showConfirm ? (
-        <button
-          onClick={() => setShowConfirm(true)}
-          className="w-full flex items-center justify-center gap-2 border-2 border-[#1A5276] text-[#1A5276] text-sm font-semibold py-2.5 rounded-lg hover:bg-[#EBF5FB] transition-colors"
-        >
-          <BedDouble className="w-4 h-4" /> 🏥 Recommend IPD Admission
-        </button>
-      ) : (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-4 space-y-3">
-          <p className="text-xs font-semibold text-blue-800">
-            Send IPD admission recommendation for <span className="font-bold">{patient.name}</span> to reception staff?
-          </p>
-          <div className="flex gap-2">
-            <button onClick={() => setShowConfirm(false)}
-              className="flex-1 border border-gray-300 text-gray-600 text-xs font-semibold py-2 rounded-lg hover:bg-gray-50">Cancel</button>
-            <button onClick={handleConfirm}
-              className="flex-1 bg-[#1A5276] text-white text-xs font-semibold py-2 rounded-lg hover:bg-[#154360]">
-              Yes, Send Notification
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+import { supabase } from '../lib/supabaseClient.js'
+import { useAuth } from '../context/AuthContext.jsx'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CURRENT_DOCTOR = DOCTORS.find((d) => d.name === 'Dr. Rajesh Kumar') || DOCTORS[2]
-
-// Patients assigned to this doctor's department
-const MY_PATIENTS = PATIENTS.filter(
-  (p) => p.department === CURRENT_DOCTOR.specialty
-).map((p, i) => ({
-  ...p,
-  // Normalise status names to match our queue flow
-  status: p.status === 'InProgress' ? 'InConsultation' : p.status,
-  registeredAt: ['09:05 AM', '09:22 AM', '09:48 AM', '10:10 AM'][i] || '10:30 AM',
-}))
-
-const PAST_VISITS = [
-  { date: '12 May 2025', doctor: 'Dr. Rajesh Kumar', diagnosis: 'Sprained ankle',  rx: 'Ibuprofen 400mg',        notes: 'Rest for 1 week. Ice pack 3x daily.' },
-  { date: '03 Jan 2025', doctor: 'Dr. Anita Patel',  diagnosis: 'Viral fever',      rx: 'Paracetamol 500mg, Rest', notes: 'Plenty of fluids. Follow up if fever persists.' },
-  { date: '18 Sep 2024', doctor: 'Dr. Anita Patel',  diagnosis: 'Routine checkup',  rx: 'Multivitamins',          notes: 'All vitals normal.' },
-]
-
 const VITALS_FIELDS = [
-  { key: 'bp',     label: 'BP',     unit: 'mmHg', placeholder: '120/80', last: '118/76' },
-  { key: 'pulse',  label: 'Pulse',  unit: 'bpm',  placeholder: '72',     last: '74'     },
-  { key: 'temp',   label: 'Temp',   unit: '°F',   placeholder: '98.6',   last: '98.4'   },
-  { key: 'spo2',   label: 'SpO2',   unit: '%',    placeholder: '99',     last: '98'     },
-  { key: 'weight', label: 'Weight', unit: 'kg',   placeholder: '58',     last: '57'     },
+  { key: 'bp',     label: 'BP',     unit: 'mmHg', placeholder: '120/80' },
+  { key: 'pulse',  label: 'Pulse',  unit: 'bpm',  placeholder: '72'     },
+  { key: 'temp',   label: 'Temp',   unit: '°F',   placeholder: '98.6'   },
+  { key: 'spo2',   label: 'SpO2',   unit: '%',    placeholder: '99'     },
+  { key: 'weight', label: 'Weight', unit: 'kg',   placeholder: '58'     },
 ]
 
 const COMPLAINT_CHIPS = [
@@ -133,7 +68,66 @@ function initials(name) {
   return (name || '').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 }
 
-// ─── Part 1: Left Queue Panel ──────────────────────────────────────────────────────
+// ─── IPD Recommendation Button ────────────────────────────────────────────────
+
+function IPDRecommendButton({ patient }) {
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [sent,        setSent]        = useState(false)
+  const [toast,       setToast]       = useState(false)
+
+  const handleConfirm = () => {
+    setSent(true)
+    setShowConfirm(false)
+    setToast(true)
+    setTimeout(() => setToast(false), 3500)
+  }
+
+  if (sent) {
+    return (
+      <div className="mx-5 mb-3">
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5">
+          <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-xs font-semibold text-green-800">IPD admission request sent to reception</p>
+        </div>
+        {toast && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#1A5276] text-white text-sm font-semibold px-5 py-3.5 rounded-xl shadow-2xl">
+            <BedDouble className="w-4 h-4" />
+            IPD admission request sent to reception
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-5 mb-3">
+      {!showConfirm ? (
+        <button
+          onClick={() => setShowConfirm(true)}
+          className="w-full flex items-center justify-center gap-2 border-2 border-[#1A5276] text-[#1A5276] text-sm font-semibold py-2.5 rounded-lg hover:bg-[#EBF5FB] transition-colors"
+        >
+          <BedDouble className="w-4 h-4" /> 🏥 Recommend IPD Admission
+        </button>
+      ) : (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-4 space-y-3">
+          <p className="text-xs font-semibold text-blue-800">
+            Send IPD admission recommendation for <span className="font-bold">{patient?.full_name}</span> to reception staff?
+          </p>
+          <div className="flex gap-2">
+            <button onClick={() => setShowConfirm(false)}
+              className="flex-1 border border-gray-300 text-gray-600 text-xs font-semibold py-2 rounded-lg hover:bg-gray-50">Cancel</button>
+            <button onClick={handleConfirm}
+              className="flex-1 bg-[#1A5276] text-white text-xs font-semibold py-2 rounded-lg hover:bg-[#154360]">
+              Yes, Send Notification
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Queue Panel ──────────────────────────────────────────────────────────────
 
 const STATUS_QUEUE_CFG = {
   Waiting:        { label: 'Waiting',         badge: 'bg-orange-100 text-orange-700', border: 'border-l-orange-400' },
@@ -145,23 +139,20 @@ const STATUS_QUEUE_CFG = {
 
 const FILTER_TABS = ['All', 'Waiting', 'Done']
 
-function QueuePanel({ patients, selectedId, onSelect, filter, onFilter }) {
-  const filtered = patients.filter((p) => {
+function QueuePanel({ visits, selectedId, onSelect, filter, onFilter, doctorName }) {
+  const filtered = visits.filter((v) => {
     if (filter === 'All') return true
-    if (filter === 'Waiting') return ['Waiting', 'SentToOPD', 'InConsultation'].includes(p.status)
-    if (filter === 'Done') return p.status === 'Done'
+    if (filter === 'Waiting') return ['Waiting', 'SentToOPD', 'InConsultation'].includes(v.status)
+    if (filter === 'Done') return v.status === 'Done'
     return true
   })
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm flex flex-col h-full overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-[#E5E7EB] flex-shrink-0">
         <p className="text-xs font-bold text-gray-900">My Patients Today</p>
-        <p className="text-[10px] text-gray-400 mt-0.5">Showing patients assigned to {CURRENT_DOCTOR.name}</p>
+        <p className="text-[10px] text-gray-400 mt-0.5">Showing visits assigned to {doctorName || 'you'}</p>
       </div>
-
-      {/* Filter tabs */}
       <div className="flex border-b border-[#E5E7EB] flex-shrink-0">
         {FILTER_TABS.map((tab) => (
           <button
@@ -177,19 +168,19 @@ function QueuePanel({ patients, selectedId, onSelect, filter, onFilter }) {
           </button>
         ))}
       </div>
-
-      {/* Patient cards */}
       <div className="overflow-y-auto flex-1">
         {filtered.length === 0 && (
           <p className="text-xs text-gray-400 text-center py-8">No patients</p>
         )}
-        {filtered.map((p) => {
-          const cfg = STATUS_QUEUE_CFG[p.status] || STATUS_QUEUE_CFG.Waiting
-          const isActive = p.id === selectedId
+        {filtered.map((v) => {
+          const cfg      = STATUS_QUEUE_CFG[v.status] || STATUS_QUEUE_CFG.Waiting
+          const isActive = v.id === selectedId
+          const patient  = v.patients
+          const age      = patient?.date_of_birth ? calcAge(patient.date_of_birth) : null
           return (
             <button
-              key={p.id}
-              onClick={() => onSelect(p)}
+              key={v.id}
+              onClick={() => onSelect(v)}
               className={`w-full text-left px-3 py-3 border-b border-[#F3F4F6] last:border-0 border-l-4 transition-all ${
                 isActive
                   ? 'bg-[#EBF5FB] border-l-[#1A5276]'
@@ -198,15 +189,14 @@ function QueuePanel({ patients, selectedId, onSelect, filter, onFilter }) {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                  {/* Token */}
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono flex-shrink-0 ${
-                    p.status === 'Done' ? 'bg-green-100 text-green-700'
-                    : p.status === 'InConsultation' ? 'bg-[#1A5276] text-white'
+                    v.status === 'Done' ? 'bg-green-100 text-green-700'
+                    : v.status === 'InConsultation' ? 'bg-[#1A5276] text-white'
                     : 'bg-blue-100 text-blue-700'
-                  }`}>{p.token}</span>
+                  }`}>{v.token || '—'}</span>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-gray-900 truncate">{p.name}</p>
-                    <p className="text-[10px] text-gray-400">{p.age}y · {p.gender}</p>
+                    <p className="text-xs font-bold text-gray-900 truncate">{patient?.full_name || '—'}</p>
+                    <p className="text-[10px] text-gray-400">{age !== null ? `${age}y` : '—'} · {patient?.gender || '—'}</p>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -221,7 +211,9 @@ function QueuePanel({ patients, selectedId, onSelect, filter, onFilter }) {
                   )}
                 </div>
               </div>
-              <p className="text-[9px] text-gray-400 mt-1.5">{p.registeredAt}</p>
+              <p className="text-[9px] text-gray-400 mt-1.5">
+                {v.created_at ? new Date(v.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
+              </p>
             </button>
           )
         })}
@@ -230,30 +222,27 @@ function QueuePanel({ patients, selectedId, onSelect, filter, onFilter }) {
   )
 }
 
-// ─── Part 2: Top Banner ───────────────────────────────────────────────────────────
+// ─── Top Banner ───────────────────────────────────────────────────────────────
 
-function TopBanner({ patient, onBreak, onResume, isOnBreak, seenCount, waitingCount }) {
-  const age = patient?.dob ? calcAge(patient.dob) : patient?.age
-  const ini = patient ? initials(patient.name) : '?'
+function TopBanner({ visit, doctorProfile, onBreak, onResume, isOnBreak, seenCount, waitingCount }) {
+  const patient = visit?.patients
+  const age     = patient?.date_of_birth ? calcAge(patient.date_of_birth) : null
+  const ini     = patient ? initials(patient.full_name) : '?'
 
   if (isOnBreak) {
     return (
       <div className="rounded-xl overflow-hidden shadow-sm flex-shrink-0 bg-orange-500">
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white text-2xl">
-              ☕
-            </div>
+            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white text-2xl">☕</div>
             <div>
               <p className="text-[10px] font-semibold text-white/70 uppercase tracking-widest">Status</p>
               <p className="text-xl font-bold text-white">Doctor is on a break</p>
               <p className="text-xs text-white/70 mt-0.5">Queue is paused. Patients are waiting.</p>
             </div>
           </div>
-          <button
-            onClick={onResume}
-            className="flex items-center gap-2 bg-white text-orange-600 text-sm font-bold px-4 py-2.5 rounded-lg hover:bg-orange-50 transition-colors shadow"
-          >
+          <button onClick={onResume}
+            className="flex items-center gap-2 bg-white text-orange-600 text-sm font-bold px-4 py-2.5 rounded-lg hover:bg-orange-50 transition-colors shadow">
             <Play className="w-4 h-4" /> Resume
           </button>
         </div>
@@ -271,21 +260,18 @@ function TopBanner({ patient, onBreak, onResume, isOnBreak, seenCount, waitingCo
           <div>
             <p className="text-[10px] font-semibold text-white/60 uppercase tracking-widest">Now Seeing</p>
             <p className="text-xl font-bold text-white leading-tight mt-0.5">
-              {patient?.name || 'No patient selected'}
-              {patient && <span className="text-white/60 font-normal text-base ml-2">— Token {patient.token}</span>}
+              {patient?.full_name || 'No patient selected'}
+              {visit && <span className="text-white/60 font-normal text-base ml-2">— Token {visit.token}</span>}
             </p>
-            {patient?.uhid && (
-              <p className="text-[11px] text-white/50 mt-0.5 font-mono">{patient.uhid}</p>
-            )}
-            {patient?.reason && (
-              <p className="text-[11px] text-white/70 mt-0.5 italic">“{patient.reason}”</p>
+            {patient?.mobile_number && (
+              <p className="text-[11px] text-white/50 mt-0.5">{patient.mobile_number}</p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {patient && (
+          {patient && age !== null && (
             <span className="text-sm text-white/80 font-medium">
-              {age}y · {patient.gender} · {patient.bloodGroup || '—'}
+              {age}y · {patient.gender || '—'}
             </span>
           )}
           <span className="inline-flex items-center gap-1.5 bg-green-500/20 text-green-300 text-xs font-semibold px-3 py-1.5 rounded-full border border-green-400/30">
@@ -294,14 +280,11 @@ function TopBanner({ patient, onBreak, onResume, isOnBreak, seenCount, waitingCo
           </span>
         </div>
       </div>
-
-      {/* Stats strip */}
       <div className="flex items-center justify-between px-6 py-2.5 bg-black/20 border-t border-white/10">
         <div className="flex items-center gap-6">
           {[
-            { label: 'Seen today',      value: String(seenCount) },
-            { label: 'Waiting',         value: String(waitingCount) },
-            { label: 'Avg per patient', value: '14 min' },
+            { label: 'Seen today',  value: String(seenCount)    },
+            { label: 'Waiting',     value: String(waitingCount) },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center gap-2">
               <span className="text-white/50 text-xs">{label}:</span>
@@ -309,10 +292,8 @@ function TopBanner({ patient, onBreak, onResume, isOnBreak, seenCount, waitingCo
             </div>
           ))}
         </div>
-        <button
-          onClick={onBreak}
-          className="flex items-center gap-2 border border-orange-400/60 text-orange-300 text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-orange-500/20 transition-colors"
-        >
+        <button onClick={onBreak}
+          className="flex items-center gap-2 border border-orange-400/60 text-orange-300 text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-orange-500/20 transition-colors">
           <Coffee className="w-3.5 h-3.5" /> Take a Break
         </button>
       </div>
@@ -320,10 +301,10 @@ function TopBanner({ patient, onBreak, onResume, isOnBreak, seenCount, waitingCo
   )
 }
 
-// ─── Part 3: Patient Info Card ─────────────────────────────────────────────────────
+// ─── Patient Info Card ────────────────────────────────────────────────────────
 
-function PatientInfoCard({ patient }) {
-  if (!patient) {
+function PatientInfoCard({ visit }) {
+  if (!visit) {
     return (
       <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm p-6 flex items-center justify-center">
         <p className="text-xs text-gray-400">Select a patient from the queue</p>
@@ -331,8 +312,9 @@ function PatientInfoCard({ patient }) {
     )
   }
 
-  const age = patient.dob ? calcAge(patient.dob) : patient.age
-  const ini = initials(patient.name)
+  const patient = visit.patients
+  const age     = patient?.date_of_birth ? calcAge(patient.date_of_birth) : null
+  const ini     = initials(patient?.full_name)
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm overflow-hidden">
@@ -340,114 +322,50 @@ function PatientInfoCard({ patient }) {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Patient Info</p>
       </div>
       <div className="p-4 space-y-3">
-        {/* UHID */}
-        {patient.uhid && (
-          <p className="text-[10px] font-mono text-gray-400">{patient.uhid}</p>
-        )}
-
-        {/* Avatar + name */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-[#1A5276] text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
             {ini}
           </div>
           <div>
-            <p className="text-sm font-bold text-gray-900">{patient.name}</p>
-            <p className="text-xs text-gray-500">{age} years · {patient.gender}</p>
+            <p className="text-sm font-bold text-gray-900">{patient?.full_name || '—'}</p>
+            <p className="text-xs text-gray-500">{age !== null ? `${age} years` : '—'} · {patient?.gender || '—'}</p>
           </div>
         </div>
-
-        {/* Details */}
         <div className="space-y-0 pt-1">
           {[
-            { label: 'Contact',     value: patient.contact },
-            { label: 'Blood Group', value: patient.bloodGroup || '—' },
-            { label: 'Allergies',   value: patient.allergies || 'None known' },
+            { label: 'Contact',    value: patient?.mobile_number || '—' },
+            { label: 'Department', value: visit.department || '—'       },
+            { label: 'Appt Type', value: visit.appointment_type || '—' },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center justify-between py-1.5 border-b border-[#F3F4F6] last:border-0">
               <span className="text-[11px] text-gray-500 font-medium">{label}</span>
-              <span className={`text-xs font-semibold ${
-                label === 'Allergies' && value !== 'None known' ? 'text-orange-600' : 'text-gray-800'
-              }`}>{value}</span>
+              <span className="text-xs font-semibold text-gray-800">{value}</span>
             </div>
           ))}
         </div>
-
-        {/* Chronic conditions */}
-        {patient.chronicConditions?.length > 0 && (
+        {(patient?.symptom_tags || []).length > 0 && (
           <div>
-            <p className="text-[10px] text-gray-500 font-medium mb-1.5">Chronic Conditions</p>
+            <p className="text-[10px] text-gray-500 font-medium mb-1.5">Symptom Tags</p>
             <div className="flex flex-wrap gap-1">
-              {patient.chronicConditions.map((c) => (
-                <span key={c} className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full font-medium">{c}</span>
+              {patient.symptom_tags.map((s) => (
+                <span key={s} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-medium">{s}</span>
               ))}
             </div>
           </div>
         )}
-
-        {/* Reason for visit */}
-        {patient.reason && (
-          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2.5">
-            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wide mb-1">Reason for Visit</p>
-            <p className="text-xs text-blue-800 leading-relaxed">{patient.reason}</p>
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-function PastVisitsCard() {
-  const [openIdx, setOpenIdx] = useState(null)
-  return (
-    <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-[#E5E7EB]">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Past Visits</p>
-      </div>
-      <div className="divide-y divide-[#F3F4F6]">
-        {PAST_VISITS.map((visit, i) => (
-          <div key={i}>
-            <button
-              onClick={() => setOpenIdx(openIdx === i ? null : i)}
-              className="w-full flex items-center justify-between px-4 py-3 hover:bg-[#F8F9FA] transition-colors text-left"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-gray-800">{visit.date}</span>
-                  <span className="text-[10px] text-gray-400">{visit.doctor}</span>
-                </div>
-                <p className="text-[11px] text-gray-600 mt-0.5 truncate">{visit.diagnosis}</p>
-              </div>
-              {openIdx === i
-                ? <ChevronUp className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 ml-2" />
-                : <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 ml-2" />}
-            </button>
-            {openIdx === i && (
-              <div className="px-4 pb-3 space-y-1.5 bg-[#F8F9FA]">
-                <div className="flex gap-2">
-                  <span className="text-[10px] font-semibold text-gray-500 w-16 flex-shrink-0">Rx:</span>
-                  <span className="text-[11px] text-gray-700">{visit.rx}</span>
-                </div>
-                <div className="flex gap-2">
-                  <span className="text-[10px] font-semibold text-gray-500 w-16 flex-shrink-0">Notes:</span>
-                  <span className="text-[11px] text-gray-700">{visit.notes}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ─── Vitals ────────────────────────────────────────────────────────────────────
+// ─── Vitals ───────────────────────────────────────────────────────────────────
 
 function VitalsRow({ vitals, onChange }) {
   return (
     <div>
       <p className="text-xs font-semibold text-gray-700 mb-2">Vitals</p>
       <div className="grid grid-cols-5 gap-2">
-        {VITALS_FIELDS.map(({ key, label, unit, placeholder, last }) => (
+        {VITALS_FIELDS.map(({ key, label, unit, placeholder }) => (
           <div key={key} className="flex flex-col">
             <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
               {label} <span className="text-gray-400 normal-case font-normal">({unit})</span>
@@ -457,7 +375,6 @@ function VitalsRow({ vitals, onChange }) {
               onChange={(e) => onChange(key, e.target.value)}
               className="border border-[#E5E7EB] rounded-lg px-2.5 py-2 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276] text-center"
             />
-            <p className="text-[10px] text-gray-400 mt-1 text-center">Last: {last}</p>
           </div>
         ))}
       </div>
@@ -465,7 +382,7 @@ function VitalsRow({ vitals, onChange }) {
   )
 }
 
-// ─── Part 4: Presenting Complaints ────────────────────────────────────────────────
+// ─── Presenting Complaints ────────────────────────────────────────────────────
 
 function ComplaintField({ value, onChange }) {
   const appendChip = (chip) => {
@@ -494,7 +411,7 @@ function ComplaintField({ value, onChange }) {
   )
 }
 
-// ─── Prescription Table ───────────────────────────────────────────────────────────
+// ─── Prescription Table ───────────────────────────────────────────────────────
 
 function PrescriptionTable({ rows, onChange, onAdd, onRemove }) {
   return (
@@ -556,7 +473,7 @@ function PrescriptionTable({ rows, onChange, onAdd, onRemove }) {
   )
 }
 
-// ─── Lab Test Dropdown ──────────────────────────────────────────────────────────
+// ─── Lab Test Dropdown ────────────────────────────────────────────────────────
 
 function LabTestDropdown({ selected, onToggle, onClose }) {
   return (
@@ -604,7 +521,7 @@ function LabTestDropdown({ selected, onToggle, onClose }) {
   )
 }
 
-// ─── Part 5: Mark Done Action Card ────────────────────────────────────────────────
+// ─── Saved Action Card ────────────────────────────────────────────────────────
 
 function SavedActionCard({ patientName, onCallNext, onBreak }) {
   return (
@@ -627,9 +544,9 @@ function SavedActionCard({ patientName, onCallNext, onBreak }) {
   )
 }
 
-// ─── Toast ─────────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
 
-function Toast({ message, onDone }) {
+function Toast({ message }) {
   return (
     <div
       className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#1A5276] text-white text-sm font-semibold px-5 py-3.5 rounded-xl shadow-2xl"
@@ -641,57 +558,44 @@ function Toast({ message, onDone }) {
   )
 }
 
-// ─── Part 6: Print Layout (screen-hidden, print-visible) ───────────────────────────
+// ─── Print Layout ─────────────────────────────────────────────────────────────
 
-function PrintLayout({ patient, complaint, diagnosis, rxRows, selectedTests, notes }) {
-  const age = patient?.dob ? calcAge(patient.dob) : patient?.age
+function PrintLayout({ visit, doctorProfile, complaint, diagnosis, rxRows, selectedTests, notes }) {
+  const patient = visit?.patients
+  const age     = patient?.date_of_birth ? calcAge(patient.date_of_birth) : null
   return (
     <div id="print-area" className="hidden print:block p-8 font-sans text-gray-900" style={{ fontFamily: 'Arial, sans-serif' }}>
-      {/* Hospital header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
         <div style={{ width: 200, height: 60, background: '#e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4 }}>
           <span style={{ color: '#9ca3af', fontSize: 12 }}>Hospital Logo</span>
         </div>
         <div>
-          <p style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>Shree Sai Multi-Specialty Hospital</p>
-          <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>Ahmedabad, Gujarat | Ph: +91 98765 43210</p>
+          <p style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>MediCore Hospital</p>
+          <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>Hospital Management System</p>
         </div>
       </div>
       <hr style={{ borderColor: '#d1d5db', margin: '12px 0' }} />
-
-      {/* Patient section */}
       <div style={{ marginBottom: 12 }}>
         <p style={{ fontSize: 13, margin: '4px 0' }}>
-          <strong>Patient Name:</strong> {patient?.name || '—'} &nbsp;|&nbsp;
-          <strong>UHID:</strong> {patient?.uhid || '—'}
+          <strong>Patient Name:</strong> {patient?.full_name || '—'} &nbsp;|&nbsp;
+          <strong>Mobile:</strong> {patient?.mobile_number || '—'}
         </p>
         <p style={{ fontSize: 13, margin: '4px 0' }}>
-          <strong>Age:</strong> {age} &nbsp;|&nbsp;
-          <strong>Gender:</strong> {patient?.gender} &nbsp;|&nbsp;
+          <strong>Age:</strong> {age !== null ? age : '—'} &nbsp;|&nbsp;
+          <strong>Gender:</strong> {patient?.gender || '—'} &nbsp;|&nbsp;
           <strong>Date:</strong> {todayStr()}
         </p>
         <p style={{ fontSize: 13, margin: '4px 0' }}>
-          <strong>Doctor:</strong> {CURRENT_DOCTOR.name} &nbsp;|&nbsp;
-          <strong>Dept:</strong> {CURRENT_DOCTOR.specialty}
+          <strong>Doctor:</strong> {doctorProfile?.full_name || '—'} &nbsp;|&nbsp;
+          <strong>Dept:</strong> {visit?.department || '—'}
         </p>
       </div>
       <hr style={{ borderColor: '#d1d5db', margin: '12px 0' }} />
-
-      {/* Clinical section */}
       <div style={{ marginBottom: 12 }}>
-        {patient?.reason && (
-          <p style={{ fontSize: 13, margin: '4px 0' }}><strong>Reason for Visit:</strong> {patient.reason}</p>
-        )}
-        {complaint && (
-          <p style={{ fontSize: 13, margin: '4px 0' }}><strong>Presenting Complaints:</strong> {complaint}</p>
-        )}
-        {diagnosis && (
-          <p style={{ fontSize: 13, margin: '4px 0' }}><strong>Diagnosis:</strong> {diagnosis}</p>
-        )}
+        {complaint && <p style={{ fontSize: 13, margin: '4px 0' }}><strong>Presenting Complaints:</strong> {complaint}</p>}
+        {diagnosis  && <p style={{ fontSize: 13, margin: '4px 0' }}><strong>Diagnosis:</strong> {diagnosis}</p>}
       </div>
       <hr style={{ borderColor: '#d1d5db', margin: '12px 0' }} />
-
-      {/* Prescription table */}
       <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Prescription</p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
         <thead>
@@ -713,8 +617,6 @@ function PrintLayout({ patient, complaint, diagnosis, rxRows, selectedTests, not
           ))}
         </tbody>
       </table>
-
-      {/* Lab tests */}
       {selectedTests.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           <p style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Lab Tests Ordered</p>
@@ -723,15 +625,8 @@ function PrintLayout({ patient, complaint, diagnosis, rxRows, selectedTests, not
           </ul>
         </div>
       )}
-
-      {/* Notes */}
-      {notes && (
-        <p style={{ fontSize: 13, margin: '8px 0' }}><strong>Additional Notes:</strong> {notes}</p>
-      )}
-
+      {notes && <p style={{ fontSize: 13, margin: '8px 0' }}><strong>Additional Notes:</strong> {notes}</p>}
       <hr style={{ borderColor: '#d1d5db', margin: '16px 0' }} />
-
-      {/* Footer */}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 24 }}>
         <p>Next Follow-up: ___________________________</p>
         <p>Doctor Signature: ___________________________</p>
@@ -744,115 +639,180 @@ function PrintLayout({ patient, complaint, diagnosis, rxRows, selectedTests, not
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function OPDDoctor() {
-  // Queue state
-  const [queuePatients, setQueuePatients] = useState(MY_PATIENTS)
-  const [selectedPatient, setSelectedPatient] = useState(
-    MY_PATIENTS.find((p) => p.status === 'InConsultation') || MY_PATIENTS[0] || null
-  )
-  const [queueFilter, setQueueFilter] = useState('All')
+  const { profile } = useAuth()
 
-  // Break state
-  const [isOnBreak, setIsOnBreak] = useState(false)
+  // ── Data loading ────────────────────────────────────────────────────────────
+  const [visits,       setVisits]       = useState([])
+  const [loadError,    setLoadError]    = useState('')
+  const [loadingQueue, setLoadingQueue] = useState(true)
 
-  // Consultation form state
+  // Load today's visits for this doctor, joined with patient data
+  const loadVisits = useCallback(async () => {
+    if (!profile?.id) return
+    setLoadError('')
+    setLoadingQueue(true)
+    try {
+      const todayStart = new Date()
+      todayStart.setHours(0, 0, 0, 0)
+
+      const { data, error } = await supabase
+        .from('visits')
+        .select(`
+          id, hospital_id, patient_id, doctor_id, department,
+          appointment_type, time_slot, token, status,
+          vitals, presenting_complaint, diagnosis, notes,
+          prescriptions, lab_tests_ordered, created_at, completed_at,
+          patients (
+            id, full_name, date_of_birth, gender, mobile_number,
+            symptom_tags, referral_source
+          )
+        `)
+        .eq('doctor_id', profile.id)
+        .eq('hospital_id', profile.hospital_id)
+        .gte('created_at', todayStart.toISOString())
+        .order('created_at', { ascending: true })
+
+      if (error) throw error
+      setVisits(data || [])
+    } catch (err) {
+      console.error('Failed to load visits:', err)
+      setLoadError('Failed to load patient queue. Please check your connection and try again.')
+    } finally {
+      setLoadingQueue(false)
+    }
+  }, [profile?.id, profile?.hospital_id])
+
+  useEffect(() => { loadVisits() }, [loadVisits])
+
+  // ── Queue / selection state ─────────────────────────────────────────────────
+  const [selectedVisit, setSelectedVisit] = useState(null)
+  const [queueFilter,   setQueueFilter]   = useState('All')
+  const [isOnBreak,     setIsOnBreak]     = useState(false)
+
+  // Auto-select first non-done visit on load
+  useEffect(() => {
+    if (visits.length > 0 && !selectedVisit) {
+      const first = visits.find((v) => v.status !== 'Done') || visits[0]
+      setSelectedVisit(first)
+    }
+  }, [visits, selectedVisit])
+
+  // ── Consultation form state ─────────────────────────────────────────────────
   const [vitals,    setVitals]    = useState({ bp: '', pulse: '', temp: '', spo2: '', weight: '' })
   const [complaint, setComplaint] = useState('')
   const [diagnosis, setDiagnosis] = useState('')
   const [notes,     setNotes]     = useState('')
   const [whatsapp,  setWhatsapp]  = useState(true)
-  const [rxRows,    setRxRows]    = useState([
-    { medicine: 'Ibuprofen', dosage: '400mg', frequency: '1-0-1', days: '5', instructions: 'After meals' },
-  ])
+  const [rxRows,    setRxRows]    = useState([{ ...EMPTY_RX_ROW }])
+  const [showLab,       setShowLab]       = useState(false)
+  const [selectedTests, setSelectedTests] = useState([])
+
+  // ── Save state ──────────────────────────────────────────────────────────────
+  const [saved,      setSaved]      = useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const [saveError,  setSaveError]  = useState('')
+  const [toast,      setToast]      = useState(null)
+
   const updateVital = (key, val) => setVitals((v) => ({ ...v, [key]: val }))
   const updateRx    = (i, field, val) => setRxRows((r) => r.map((row, idx) => idx === i ? { ...row, [field]: val } : row))
   const addRxRow    = () => setRxRows((r) => [...r, { ...EMPTY_RX_ROW }])
   const removeRx    = (i) => setRxRows((r) => r.filter((_, idx) => idx !== i))
+  const toggleTest  = (name) => setSelectedTests((t) => t.includes(name) ? t.filter((x) => x !== name) : [...t, name])
 
-  // Lab tests
-  const [showLab,       setShowLab]       = useState(false)
-  const [selectedTests, setSelectedTests] = useState([])
-  const toggleTest = (name) =>
-    setSelectedTests((t) => t.includes(name) ? t.filter((x) => x !== name) : [...t, name])
+  const seenCount    = visits.filter((v) => v.status === 'Done').length
+  const waitingCount = visits.filter((v) => ['Waiting', 'SentToOPD'].includes(v.status)).length
 
-  // Save / done flow
-  const [saved,     setSaved]     = useState(false)
-  const [toast,     setToast]     = useState(null)
-
-  const seenCount    = queuePatients.filter((p) => p.status === 'Done').length
-  const waitingCount = queuePatients.filter((p) => ['Waiting', 'SentToOPD'].includes(p.status)).length
-
-  // Select patient from queue
-  const handleSelectPatient = (p) => {
-    setSelectedPatient(p)
-    setSaved(false)
-    setComplaint('')
-    setDiagnosis('')
-    setNotes('')
-    setRxRows([{ ...EMPTY_RX_ROW }])
-    setSelectedTests([])
-  }
-
-  // Save & Mark Done
-  const handleSave = () => {
-    if (!selectedPatient) return
-    setQueuePatients((prev) =>
-      prev.map((p) => p.id === selectedPatient.id ? { ...p, status: 'Done' } : p)
-    )
-    setSaved(true)
-  }
-
-  // Call Next Patient
-  const handleCallNext = () => {
-    const nextPatient = queuePatients.find(
-      (p) => ['Waiting', 'SentToOPD'].includes(p.status) && p.id !== selectedPatient?.id
-    )
-    if (nextPatient) {
-      setQueuePatients((prev) =>
-        prev.map((p) =>
-          p.id === nextPatient.id ? { ...p, status: 'SentToOPD' } : p
-        )
-      )
-      setSelectedPatient(nextPatient)
-      setSaved(false)
-      setComplaint('')
-      setDiagnosis('')
-      setNotes('')
-      setRxRows([{ ...EMPTY_RX_ROW }])
-      setSelectedTests([])
-      showToast(`Next patient: ${nextPatient.name} (${nextPatient.token}) has been notified`)
-    } else {
-      showToast('No more patients in queue')
-    }
-  }
-
-  // Break
-  const handleBreak = () => {
-    if (selectedPatient && !saved) {
-      // Mark current done before break
-      setQueuePatients((prev) =>
-        prev.map((p) => p.id === selectedPatient.id ? { ...p, status: 'Done' } : p)
-      )
-    }
-    setSaved(false)
-    setIsOnBreak(true)
-  }
-
-  const handleResume = () => setIsOnBreak(false)
-
-  // Toast helper
   const showToast = (msg) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Print
-  const handlePrint = () => window.print()
+  // Reset consultation form when a new patient is selected
+  const handleSelectVisit = (v) => {
+    setSelectedVisit(v)
+    setSaved(false)
+    setSaveError('')
+    setComplaint(v.presenting_complaint || '')
+    setDiagnosis(v.diagnosis || '')
+    setNotes(v.notes || '')
+    setVitals(v.vitals || { bp: '', pulse: '', temp: '', spo2: '', weight: '' })
+    setRxRows(
+      Array.isArray(v.prescriptions) && v.prescriptions.length > 0
+        ? v.prescriptions
+        : [{ ...EMPTY_RX_ROW }]
+    )
+    setSelectedTests(Array.isArray(v.lab_tests_ordered) ? v.lab_tests_ordered : [])
+  }
 
+  // Save & Mark Done — writes to Supabase visits row
+  const handleSave = async () => {
+    if (!selectedVisit) return
+    setSaveError('')
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('visits')
+        .update({
+          vitals:               vitals,
+          presenting_complaint: complaint || null,
+          diagnosis:            diagnosis || null,
+          notes:                notes || null,
+          prescriptions:        rxRows.filter((r) => r.medicine.trim()),
+          lab_tests_ordered:    selectedTests,
+          status:               'Done',
+          completed_at:         new Date().toISOString(),
+        })
+        .eq('id', selectedVisit.id)
+
+      if (error) throw error
+
+      // Update local state to reflect Done status
+      const updatedVisit = {
+        ...selectedVisit,
+        vitals,
+        presenting_complaint: complaint || null,
+        diagnosis:            diagnosis || null,
+        notes:                notes || null,
+        prescriptions:        rxRows.filter((r) => r.medicine.trim()),
+        lab_tests_ordered:    selectedTests,
+        status:               'Done',
+        completed_at:         new Date().toISOString(),
+      }
+      setVisits((prev) => prev.map((v) => v.id === selectedVisit.id ? updatedVisit : v))
+      setSelectedVisit(updatedVisit)
+      setSaved(true)
+    } catch (err) {
+      console.error('Failed to save consultation:', err)
+      setSaveError(err.message || 'Failed to save. Please try again.')
+      // Do NOT set saved=true — local queue state is not updated on failure
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Call Next Patient
+  const handleCallNext = () => {
+    const nextVisit = visits.find(
+      (v) => ['Waiting', 'SentToOPD'].includes(v.status) && v.id !== selectedVisit?.id
+    )
+    if (nextVisit) {
+      handleSelectVisit(nextVisit)
+      showToast(`Next patient: ${nextVisit.patients?.full_name || '—'} (${nextVisit.token || '—'}) called`)
+    } else {
+      showToast('No more patients in queue')
+    }
+  }
+
+  const handleBreak  = () => { setSaved(false); setIsOnBreak(true) }
+  const handleResume = () => setIsOnBreak(false)
+  const handlePrint  = () => window.print()
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Print-only layout */}
       <PrintLayout
-        patient={selectedPatient}
+        visit={selectedVisit}
+        doctorProfile={profile}
         complaint={complaint}
         diagnosis={diagnosis}
         rxRows={rxRows}
@@ -860,167 +820,168 @@ export default function OPDDoctor() {
         notes={notes}
       />
 
-      {/* Screen layout */}
       <div className="flex flex-col space-y-4 print:hidden">
-        {/* Banner */}
-        <TopBanner
-          patient={selectedPatient}
-          isOnBreak={isOnBreak}
-          onBreak={handleBreak}
-          onResume={handleResume}
-          seenCount={seenCount}
-          waitingCount={waitingCount}
-        />
+        {loadingQueue && (
+          <div className="flex items-center justify-center py-8">
+            <span className="w-5 h-5 border-2 border-gray-200 border-t-[#1A5276] rounded-full animate-spin" />
+            <span className="ml-2 text-sm text-gray-400">Loading patient queue...</span>
+          </div>
+        )}
+        {loadError && (
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700 flex-1">{loadError}</p>
+            <button onClick={loadVisits} className="text-xs font-semibold text-red-600 hover:underline flex-shrink-0">Retry</button>
+          </div>
+        )}
 
-        {/* Three-column layout: Queue | Info+History | Consultation */}
-        <div className="grid gap-4" style={{ gridTemplateColumns: '28% 22% 1fr', minHeight: 0 }}>
-
-          {/* LEFT: Queue panel */}
-          <div style={{ height: 'calc(100vh - 64px - 48px - 120px)' }}>
-            <QueuePanel
-              patients={queuePatients}
-              selectedId={selectedPatient?.id}
-              onSelect={handleSelectPatient}
-              filter={queueFilter}
-              onFilter={setQueueFilter}
+        {!loadingQueue && !loadError && (
+          <>
+            <TopBanner
+              visit={selectedVisit}
+              doctorProfile={profile}
+              isOnBreak={isOnBreak}
+              onBreak={handleBreak}
+              onResume={handleResume}
+              seenCount={seenCount}
+              waitingCount={waitingCount}
             />
-          </div>
 
-          {/* MIDDLE: Patient info + past visits */}
-          <div className="space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 64px - 48px - 120px)' }}>
-            <PatientInfoCard patient={selectedPatient} />
-            <PastVisitsCard />
-          </div>
-
-          {/* RIGHT: Consultation form */}
-          <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm flex flex-col overflow-hidden"
-            style={{ maxHeight: 'calc(100vh - 64px - 48px - 120px)' }}>
-            <div className="px-5 py-4 border-b border-[#E5E7EB] flex-shrink-0">
-              <h3 className="text-sm font-bold text-gray-900">Consultation</h3>
-              <p className="text-xs text-gray-500 mt-0.5">{CURRENT_DOCTOR.name} · {CURRENT_DOCTOR.specialty} · {CURRENT_DOCTOR.room}</p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
-              <VitalsRow vitals={vitals} onChange={updateVital} />
-              <div className="border-t border-[#F3F4F6]" />
-              <ComplaintField value={complaint} onChange={setComplaint} />
-
-              {/* Diagnosis */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Diagnosis</label>
-                <input type="text" placeholder="Primary diagnosis..."
-                  value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)}
-                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
+            <div className="grid gap-4" style={{ gridTemplateColumns: '28% 22% 1fr', minHeight: 0 }}>
+              <div style={{ height: 'calc(100vh - 64px - 48px - 120px)' }}>
+                <QueuePanel
+                  visits={visits}
+                  selectedId={selectedVisit?.id}
+                  onSelect={handleSelectVisit}
+                  filter={queueFilter}
+                  onFilter={setQueueFilter}
+                  doctorName={profile?.full_name}
+                />
               </div>
 
-              <PrescriptionTable rows={rxRows} onChange={updateRx} onAdd={addRxRow} onRemove={removeRx} />
-
-              {/* Ordered lab tests summary */}
-              {selectedTests.length > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FlaskConical className="w-3.5 h-3.5 text-blue-600" />
-                    <p className="text-xs font-semibold text-blue-700">Ordered Lab Tests</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedTests.map((t) => (
-                      <span key={t} className="text-[11px] bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full font-medium">{t}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Additional Notes */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Additional Notes</label>
-                <textarea rows={2} placeholder="Follow-up instructions, diet advice, referrals..."
-                  value={notes} onChange={(e) => setNotes(e.target.value)}
-                  className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276] resize-none" />
+              <div className="space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 64px - 48px - 120px)' }}>
+                <PatientInfoCard visit={selectedVisit} />
               </div>
 
-              {/* WhatsApp toggle */}
-              <div className="flex items-center justify-between bg-[#F8F9FA] rounded-lg px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <MessageCircle className="w-4 h-4 text-[#25D366]" />
-                  <div>
-                    <p className="text-xs font-semibold text-gray-800">Share via WhatsApp</p>
-                    <p className="text-[10px] text-gray-500">Send prescription to patient's mobile</p>
-                  </div>
+              <div className="bg-white rounded-lg border border-[#E5E7EB] shadow-sm flex flex-col overflow-hidden"
+                style={{ maxHeight: 'calc(100vh - 64px - 48px - 120px)' }}>
+                <div className="px-5 py-4 border-b border-[#E5E7EB] flex-shrink-0">
+                  <h3 className="text-sm font-bold text-gray-900">Consultation</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {profile?.full_name || 'Doctor'} · {profile?.specialty || selectedVisit?.department || '—'}
+                  </p>
                 </div>
-                <button type="button" onClick={() => setWhatsapp((v) => !v)}
-                  className={`relative rounded-full transition-colors flex-shrink-0 ${
-                    whatsapp ? 'bg-[#1E8449]' : 'bg-gray-300'
-                  }`}
-                  style={{ height: '22px', width: '40px' }}>
-                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                    whatsapp ? 'translate-x-5' : 'translate-x-0.5'
-                  }`} />
-                </button>
-              </div>
-            </div>
 
-            {/* Part 5: Saved action card */}
-            {saved && (
-              <SavedActionCard
-                patientName={selectedPatient?.name}
-                onCallNext={handleCallNext}
-                onBreak={handleBreak}
-              />
-            )}
-
-            {/* Part 3: Recommend IPD Admission */}
-            {saved && selectedPatient && (
-              <IPDRecommendButton patient={selectedPatient} />
-            )}
-
-            {/* Action buttons */}
-            <div className="px-5 py-4 border-t border-[#E5E7EB] flex gap-3 flex-shrink-0">
-              {/* Save & Mark Done */}
-              {!saved && (
-                <button onClick={handleSave}
-                  disabled={!selectedPatient}
-                  className="flex-1 flex items-center justify-center gap-2 bg-[#1E8449] text-white text-sm font-bold py-3 rounded-lg hover:bg-[#196F3D] transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
-                  <Save className="w-4 h-4" /> Save &amp; Mark Done
-                </button>
-              )}
-              {saved && (
-                <div className="flex-1 flex items-center justify-center gap-2 bg-green-100 text-green-700 text-sm font-bold py-3 rounded-lg">
-                  <CheckCircle2 className="w-4 h-4" /> Saved
-                </div>
-              )}
-
-              {/* Print button */}
-              <button onClick={handlePrint}
-                className="flex items-center gap-2 border border-[#1A5276] text-[#1A5276] text-sm font-semibold px-4 py-3 rounded-lg hover:bg-[#EBF5FB] transition-colors">
-                <Printer className="w-4 h-4" /> Print
-              </button>
-
-              {/* Lab test dropdown */}
-              <div className="relative">
-                <button onClick={() => setShowLab((v) => !v)}
-                  className="flex items-center gap-2 bg-[#1A5276] text-white text-sm font-semibold px-4 py-3 rounded-lg hover:bg-[#154360] transition-colors">
-                  <FlaskConical className="w-4 h-4" />
-                  Order Lab Test
-                  {selectedTests.length > 0 && (
-                    <span className="bg-white text-[#1A5276] text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                      {selectedTests.length}
-                    </span>
+                <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+                  {saveError && (
+                    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                      <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-700">{saveError}</p>
+                    </div>
                   )}
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showLab ? 'rotate-180' : ''}`} />
-                </button>
-                {showLab && (
-                  <LabTestDropdown selected={selectedTests} onToggle={toggleTest} onClose={() => setShowLab(false)} />
+                  <VitalsRow vitals={vitals} onChange={updateVital} />
+                  <div className="border-t border-[#F3F4F6]" />
+                  <ComplaintField value={complaint} onChange={setComplaint} />
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Diagnosis</label>
+                    <input type="text" placeholder="Primary diagnosis..."
+                      value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)}
+                      className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276]" />
+                  </div>
+                  <PrescriptionTable rows={rxRows} onChange={updateRx} onAdd={addRxRow} onRemove={removeRx} />
+                  {selectedTests.length > 0 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FlaskConical className="w-3.5 h-3.5 text-blue-600" />
+                        <p className="text-xs font-semibold text-blue-700">Ordered Lab Tests</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedTests.map((t) => (
+                          <span key={t} className="text-[11px] bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full font-medium">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1.5">Additional Notes</label>
+                    <textarea rows={2} placeholder="Follow-up instructions, diet advice, referrals..."
+                      value={notes} onChange={(e) => setNotes(e.target.value)}
+                      className="w-full border border-[#E5E7EB] rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1A5276]/30 focus:border-[#1A5276] resize-none" />
+                  </div>
+                  <div className="flex items-center justify-between bg-[#F8F9FA] rounded-lg px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="w-4 h-4 text-[#25D366]" />
+                      <div>
+                        <p className="text-xs font-semibold text-gray-800">Share via WhatsApp</p>
+                        <p className="text-[10px] text-gray-500">Send prescription to patient's mobile</p>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => setWhatsapp((v) => !v)}
+                      className={`relative rounded-full transition-colors flex-shrink-0 ${
+                        whatsapp ? 'bg-[#1E8449]' : 'bg-gray-300'
+                      }`}
+                      style={{ height: '22px', width: '40px' }}>
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                        whatsapp ? 'translate-x-5' : 'translate-x-0.5'
+                      }`} />
+                    </button>
+                  </div>
+                </div>
+
+                {saved && (
+                  <SavedActionCard
+                    patientName={selectedVisit?.patients?.full_name}
+                    onCallNext={handleCallNext}
+                    onBreak={handleBreak}
+                  />
                 )}
+                {saved && selectedVisit && (
+                  <IPDRecommendButton patient={selectedVisit?.patients} />
+                )}
+
+                <div className="px-5 py-4 border-t border-[#E5E7EB] flex gap-3 flex-shrink-0">
+                  {!saved && (
+                    <button onClick={handleSave} disabled={!selectedVisit || saving}
+                      className="flex-1 flex items-center justify-center gap-2 bg-[#1E8449] text-white text-sm font-bold py-3 rounded-lg hover:bg-[#196F3D] transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {saving
+                        ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Saving...</>
+                        : <><Save className="w-4 h-4" /> Save &amp; Mark Done</>}
+                    </button>
+                  )}
+                  {saved && (
+                    <div className="flex-1 flex items-center justify-center gap-2 bg-green-100 text-green-700 text-sm font-bold py-3 rounded-lg">
+                      <CheckCircle2 className="w-4 h-4" /> Saved
+                    </div>
+                  )}
+                  <button onClick={handlePrint}
+                    className="flex items-center gap-2 border border-[#1A5276] text-[#1A5276] text-sm font-semibold px-4 py-3 rounded-lg hover:bg-[#EBF5FB] transition-colors">
+                    <Printer className="w-4 h-4" /> Print
+                  </button>
+                  <div className="relative">
+                    <button onClick={() => setShowLab((v) => !v)}
+                      className="flex items-center gap-2 bg-[#1A5276] text-white text-sm font-semibold px-4 py-3 rounded-lg hover:bg-[#154360] transition-colors">
+                      <FlaskConical className="w-4 h-4" />
+                      Order Lab Test
+                      {selectedTests.length > 0 && (
+                        <span className="bg-white text-[#1A5276] text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                          {selectedTests.length}
+                        </span>
+                      )}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showLab ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showLab && (
+                      <LabTestDropdown selected={selectedTests} onToggle={toggleTest} onClose={() => setShowLab(false)} />
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
-      {/* Toast */}
       {toast && <Toast message={toast} />}
 
-      {/* Print CSS */}
       <style>{`
         @media print {
           body * { visibility: hidden; }
